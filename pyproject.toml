@@ -1,0 +1,12 @@
+[project]
+name = "mcp_hummingbot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.11.16",
+    "mcp[cli]>=1.6.0",
+    "pandas>=2.2.3",
+    "pydantic>=2.11.2",
+]
