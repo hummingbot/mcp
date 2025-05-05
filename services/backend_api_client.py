@@ -268,7 +268,6 @@ class BackendAPIClient(ClientBase):
                 "markets": {},
                 "candles_config": [],
                 "controllers_config": controller_configs_to_deploy,
-                "config_update_interval": 10,
                 "script_file_name": "v2_with_controllers.py",
             }
         }
@@ -288,3 +287,4 @@ class BackendAPIClient(ClientBase):
             "credentials_profile": credentials,
         }
         await self.create_hummingbot_instance(deploy_config)
+        return f"Bot {bot_name} deployed successfully"
