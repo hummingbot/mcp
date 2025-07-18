@@ -7,10 +7,10 @@ from typing import Optional
 from hummingbot_api_client import HummingbotAPIClient
 
 from ..config.settings import settings
-from ..utils.logging import setup_logging
-from ..exceptions import ConnectionError
+import logging
+from ..exceptions import MaxConnectionsAttemptError
 
-logger = setup_logging()
+logger = logging.getLogger("hummingbot-mcp")
 
 
 class HummingbotClient:
@@ -47,7 +47,7 @@ class HummingbotClient:
                 if attempt < settings.max_retries - 1:
                     await asyncio.sleep(settings.retry_delay)
                 else:
-                    raise ConnectionError(f"Failed to connect to Hummingbot API after {settings.max_retries} attempts: {e}")
+                    raise MaxConnectionsAttemptError(f"Failed to connect to Hummingbot API after {settings.max_retries} attempts: {e}")
     
     async def get_client(self) -> HummingbotAPIClient:
         """Get initialized client"""
