@@ -321,6 +321,7 @@ dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "pandas" },
     { name = "pydantic" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -330,6 +331,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pydantic", specifier = ">=2.11.2" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 
 [[package]]
