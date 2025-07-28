@@ -3,14 +3,14 @@ Main MCP server for Hummingbot API integration
 """
 
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 from .config.settings import settings
 from .client import hummingbot_client
 from .utils.logging import setup_logging
 from .exceptions import ToolError, MaxConnectionsAttemptError as HBConnectionError
-from .tools import account, trading, market_data
+from .tools.account import SetupConnectorRequest
 import logging
 
 logger = logging.getLogger("hummingbot-mcp")
@@ -25,59 +25,72 @@ mcp = FastMCP("hummingbot-mcp")
 async def setup_connector(
     connector: Optional[str] = None,
     credentials: Optional[Dict[str, Any]] = None,
-    account: Optional[str] = None
+    account: Optional[str] = None,
+    confirm_override: Optional[bool] = None
 ) -> str:
-    """Setup a new exchange connector with credentials. 
+    """Setup a new exchange connector with credentials using progressive disclosure.
     
-    This tool guides you through the entire process of connecting an exchange.
-    If no parameters are provided, it will list available connectors.
+    This tool guides you through the entire process of connecting an exchange with a four-step flow:
+    1. No parameters → List available exchanges
+    2. Connector only → Show required credential fields  
+    3. Connector + credentials, no account → Select account from available accounts
+    4. All parameters → Connect the exchange (with override confirmation if needed)
     
     Args:
-        connector: Exchange connector name (e.g., binance, coinbase). Leave empty to list available connectors.
-        credentials: Credentials object with required fields for the connector. Leave empty to get required fields.
-        account: Account name to add credentials to (default: master)
+        connector: Exchange connector name (e.g., 'binance', 'binance_perpetual'). Leave empty to list available connectors.
+        credentials: Credentials object with required fields for the connector. Leave empty to see required fields first.
+        account: Account name to add credentials to. If not provided, prompts for account selection.
+        confirm_override: Explicit confirmation to override existing connector. Required when connector already exists.
     """
-    from .tools.account import setup_connector as setup_connector_impl
-    
-    args = {
-        "connector": connector,
-        "credentials": credentials,
-        "account": account or settings.default_account
-    }
-    
     try:
-        result = await setup_connector_impl(args)
+        # Create and validate request using Pydantic model
+        request = SetupConnectorRequest(
+            connector=connector,
+            credentials=credentials,
+            account=account,
+            confirm_override=confirm_override
+        )
+        
+        from .tools.account import setup_connector as setup_connector_impl
+        result = await setup_connector_impl(request)
         return f"Setup Connector Result: {result}"
     except Exception as e:
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
 
 
-@mcp.tool()
-async def get_account_state(
-    account: Optional[str] = None,
-    exchanges: Optional[List[str]] = None
-) -> str:
-    """Get comprehensive account state including balances, positions, and active orders.
+@mcp.resource("portfolio://balances")
+async def get_portfolio_state() -> str:
+    """Get portfolio balances and holdings across all connected exchanges.
     
-    Args:
-        account: Account name to get state for (default: master)
-        exchanges: List of exchange names to get state for. If empty, gets all exchanges.
-    """
+    Returns detailed token balances, values, and available units for each account.
+    Use this to check your portfolio, see what tokens you hold, and their current values."""
     from .tools.account import get_account_state as get_account_state_impl
-    
-    args = {
-        "account": account or settings.default_account,
-        "exchanges": exchanges or []
-    }
-    
+
     try:
-        result = await get_account_state_impl(args)
+        result = await get_account_state_impl()
         return f"Account State: {result}"
     except Exception as e:
         logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get account state: {str(e)}")
 
+@mcp.resource("accounts://list")
+async def get_accounts_and_credentials() -> str:
+    """List all accounts and their credentials that are connected.
+
+    Returns a list of accounts with their names and associated credentials.
+    Use this to see which accounts are connected and what credentials they have."""
+
+    try:
+        client = await hummingbot_client.get_client()
+        accounts = await client.accounts.list_accounts()
+        tasks = [client.accounts.list_account_credentials(account) for account in accounts]
+        credentials_list = await asyncio.gather(*tasks)
+        result = {account: credentials for account, credentials in zip(accounts, credentials_list)}
+        return f"Accounts and Credentials: {result}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 # Trading Tools
 
