@@ -17,7 +17,7 @@ class Settings(BaseModel):
     api_url: str = Field(default="http://localhost:8000")
     api_username: str = Field(default="admin")
     api_password: str = Field(default="admin") 
-    default_account: str = Field(default="master")
+    default_account: str = Field(default="master_account")
     
     # Connection settings
     connection_timeout: float = Field(default=30.0)
