@@ -255,14 +255,14 @@ wheels = [
 
 [[package]]
 name = "hummingbot-api-client"
-version = "1.0.5"
+version = "1.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fe/6f/7b12b89ce4315e7527fd7f1823bc83234edd97376c5c5011b6341932824c/hummingbot_api_client-1.0.5.tar.gz", hash = "sha256:e91364f30286f741f7d19fe4a85a07bf14d5e1e3bdec5b7fddf63e69997460d1", size = 24302 }
+sdist = { url = "https://files.pythonhosted.org/packages/64/94/fa2ac304e43102d93bc57356c004d9d29cfba92e36c959e1cf8c702e0de1/hummingbot_api_client-1.1.2.tar.gz", hash = "sha256:39243802447240309d0e7c30321da63c6a2ae38c77487a68ebb706596af9232a", size = 24686 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/bd/27cc1826c9419d7481a9d51028d61eb15c14639498a666d13c9edb078f87/hummingbot_api_client-1.0.5-py3-none-any.whl", hash = "sha256:0d866fc6c1a7b3483c7f646a8141eb49f113b8bc324770a351a89272596464ef", size = 28752 },
+    { url = "https://files.pythonhosted.org/packages/98/39/23ce2aa90a083d602ec4f4761649cd5bf35e6736f9d958e4dcb38110e473/hummingbot_api_client-1.1.2-py3-none-any.whl", hash = "sha256:46d1c0f57f9bcf4f6ac8688b5c17b0459c2e0429dc9bb41911836e43f0325460", size = 29212 },
 ]
 
 [[package]]
@@ -327,7 +327,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11.16" },
-    { name = "hummingbot-api-client", specifier = ">=1.0.5" },
+    { name = "hummingbot-api-client", specifier = "==1.1.2" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pydantic", specifier = ">=2.11.2" },
