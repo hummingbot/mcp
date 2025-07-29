@@ -7,7 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, validator, field_validator
 import aiohttp
 
-from ..exceptions import ConfigurationError
+from mcp_hummingbot.exceptions import ConfigurationError
 
 
 class Settings(BaseModel):
