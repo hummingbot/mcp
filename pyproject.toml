@@ -1,12 +1,21 @@
 [project]
 name = "mcp_hummingbot"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP server for Hummingbot API integration - manage crypto trading across multiple exchanges"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.11.16",
+    "hummingbot-api-client==1.1.2",
     "mcp[cli]>=1.6.0",
     "pandas>=2.2.3",
     "pydantic>=2.11.2",
+    "python-dotenv>=1.0.0",
 ]
+
+[project.scripts]
+mcp-hummingbot = "mcp_hummingbot:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
