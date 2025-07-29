@@ -99,22 +99,32 @@ async def create_delete_accounts(
 
 
 @mcp.tool()
-async def get_portfolio_balances(account_names: Optional[List[str]], connector_names: Optional[List[str]]) -> str:
+async def get_portfolio_balances(account_names: Optional[List[str]] = None,
+                                 connector_names: Optional[List[str]] = None,
+                                 as_distribution: bool = False) -> str:
     """Get portfolio balances and holdings across all connected exchanges.
     
     Returns detailed token balances, values, and available units for each account. Use this to check your portfolio,
     see what tokens you hold, and their current values. If passing accounts and connectors it will only return the
     filtered accounts and connectors, leave it empty to return all accounts and connectors.
+    You can also get the portfolio distribution by setting `as_distribution` to True, which will return the distribution
+    of tokens and their values across accounts and connectors and the percentage of each token in the portfolio.
 
     Args:
         account_names: List of account names to filter by (optional). If empty, returns all accounts.
         connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
+        as_distribution: If True, returns the portfolio distribution as a percentage of each token in the portfolio and
+        their values across accounts and connectors. Defaults to False.
     """
-    from .tools.account import get_account_state as get_account_state_impl
-
     try:
-        result = await get_account_state_impl(account_names, connector_names)
-        return f"Account State: {result}"
+        # Get account credentials to know which exchanges are connected
+        client = await hummingbot_client.get_client()
+        if as_distribution:
+            # Get portfolio distribution
+            result = await client.portfolio.get_distribution(account_names=account_names, connector_names=connector_names)
+            return f"Portfolio Distribution: {result}"
+        account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
+        return f"Account State: {account_info}"
     except Exception as e:
         logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get account state: {str(e)}")
