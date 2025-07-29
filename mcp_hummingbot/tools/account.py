@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 from mcp_hummingbot.hummingbot_client import hummingbot_client
 from mcp_hummingbot.settings import settings
-from ..exceptions import ToolError
+from mcp_hummingbot.exceptions import ToolError
 import logging
 
 logger = logging.getLogger("hummingbot-mcp")

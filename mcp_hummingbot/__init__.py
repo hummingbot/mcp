@@ -6,7 +6,7 @@ Enables AI assistants to manage crypto trading across multiple exchanges.
 """
 
 __version__ = "0.1.0"
-__author__ = "Hummingbot Community"
+__author__ = "Federico Cardoso"
 
 from .server import main
 
