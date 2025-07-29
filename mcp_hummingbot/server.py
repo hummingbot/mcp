@@ -13,6 +13,14 @@ from mcp_hummingbot.exceptions import ToolError, MaxConnectionsAttemptError as H
 from mcp_hummingbot.tools.account import SetupConnectorRequest
 import logging
 
+# Configure root logger
+logging.basicConfig(
+    level="INFO",
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stderr)
+    ]
+)
 logger = logging.getLogger("hummingbot-mcp")
 
 # Initialize FastMCP server
@@ -416,7 +424,6 @@ async def get_order_book(
 async def main():
     """Run the MCP server"""
     # Setup logging once at application start
-    setup_logging()
     logger.info("Starting Hummingbot MCP Server")
     logger.info(f"API URL: {settings.api_url}")
     logger.info(f"Default Account: {settings.default_account}")
