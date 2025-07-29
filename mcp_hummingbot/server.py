@@ -3,12 +3,12 @@ Main MCP server for Hummingbot API integration
 """
 
 import asyncio
+import sys
 from typing import Dict, Any, Optional, List, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp_hummingbot.settings import settings
 from mcp_hummingbot.hummingbot_client import hummingbot_client
-from mcp_hummingbot.logging import setup_logging
 from mcp_hummingbot.exceptions import ToolError, MaxConnectionsAttemptError as HBConnectionError
 from mcp_hummingbot.tools.account import SetupConnectorRequest
 import logging

@@ -37,30 +37,7 @@ An MCP (Model Context Protocol) server that enables Claude to interact with Humm
            "--directory",
            "/path/to/mcp",
            "run",
-           "mcp-hummingbot"
-         ],
-         "env": {
-           "HUMMINGBOT_API_URL": "http://localhost:15888",
-           "HUMMINGBOT_USERNAME": "your-username",
-           "HUMMINGBOT_PASSWORD": "your-password"
-         }
-       }
-     }
-   }
-   ```
-   
-   Or run the server module directly:
-   ```json
-   {
-     "mcpServers": {
-       "mcp-hummingbot": {
-         "type": "stdio",
-         "command": "uv",
-         "args": [
-           "--directory",
-           "/path/to/mcp",
-           "run",
-           "mcp_hummingbot/server.py"
+           "main.py"
          ],
          "env": {
            "HUMMINGBOT_API_URL": "http://localhost:15888",
@@ -72,7 +49,32 @@ An MCP (Model Context Protocol) server that enables Claude to interact with Humm
    }
    ```
 
-### Option 2: Using Docker (Recommended for Production)
+### Option 2: Using Python Directly
+
+1. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure in Claude Code**:
+   ```json
+   {
+     "mcpServers": {
+       "mcp-hummingbot": {
+         "type": "stdio",
+         "command": "python",
+         "args": ["/path/to/mcp/main.py"],
+         "env": {
+           "HUMMINGBOT_API_URL": "http://localhost:15888",
+           "HUMMINGBOT_USERNAME": "your-username",
+           "HUMMINGBOT_PASSWORD": "your-password"
+         }
+       }
+     }
+   }
+   ```
+
+### Option 3: Using Docker (Recommended for Production)
 
 1. **Build the Docker image**:
    ```bash
