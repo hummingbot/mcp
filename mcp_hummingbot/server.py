@@ -3,7 +3,7 @@ Main MCP server for Hummingbot API integration
 """
 
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from mcp.server.fastmcp import FastMCP
 from .config.settings import settings
@@ -28,7 +28,7 @@ async def setup_connector(
     account: Optional[str] = None,
     confirm_override: Optional[bool] = None
 ) -> str:
-    """Setup a new exchange connector with credentials using progressive disclosure.
+    """Setup a new exchange connector for an account with credentials using progressive disclosure.
     
     This tool guides you through the entire process of connecting an exchange with a four-step flow:
     1. No parameters → List available exchanges
@@ -58,39 +58,66 @@ async def setup_connector(
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
 
+@mcp.tool()
+async def create_delete_accounts(
+    action: str,
+    account_name: Optional[str] = None,
+    credential: Optional[str] = None,
+) -> str:
+    """
+    Create or delete an account. Important: Deleting an account will remove all associated credentials and data, and
+    the master_account cannot be deleted.
+    If a credential is provided, only the credential for the account will be deleted
+    Args:
+        action: Action to perform ('create' or 'delete')
+        account_name: Name of the account to create or delete. Required for 'create' and optional for 'delete'.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if action == "create":
+            if not account_name:
+                raise ValueError("Account name is required for creating an account")
+            result = await client.accounts.add_account(account_name)
+            return f"Account '{account_name}' created successfully: {result}"
+        elif action == "delete":
+            if not account_name:
+                raise ValueError("Account name is required for deleting an account")
+            if account_name == settings.default_account:
+                raise ValueError("Cannot delete the master account")
+            if credential is not None:
+                # If credential is provided, delete only the credential for the account
+                result = await client.accounts.delete_credential(account_name, credential)
+                return f"Credential '{credential}' for account '{account_name}' deleted successfully: {result}"
+            result = await client.accounts.delete_account(account_name)
+            return f"Account '{account_name}' deleted successfully: {result}"
+        else:
+            raise ValueError("Invalid action. Must be 'create' or 'delete'.")
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
-@mcp.resource("portfolio://balances")
-async def get_portfolio_state() -> str:
+
+
+@mcp.tool()
+async def get_portfolio_balances(account_names: Optional[List[str]], connector_names: Optional[List[str]]) -> str:
     """Get portfolio balances and holdings across all connected exchanges.
     
-    Returns detailed token balances, values, and available units for each account.
-    Use this to check your portfolio, see what tokens you hold, and their current values."""
+    Returns detailed token balances, values, and available units for each account. Use this to check your portfolio,
+    see what tokens you hold, and their current values. If passing accounts and connectors it will only return the
+    filtered accounts and connectors, leave it empty to return all accounts and connectors.
+
+    Args:
+        account_names: List of account names to filter by (optional). If empty, returns all accounts.
+        connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
+    """
     from .tools.account import get_account_state as get_account_state_impl
 
     try:
-        result = await get_account_state_impl()
+        result = await get_account_state_impl(account_names, connector_names)
         return f"Account State: {result}"
     except Exception as e:
         logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get account state: {str(e)}")
-
-@mcp.resource("accounts://list")
-async def get_accounts_and_credentials() -> str:
-    """List all accounts and their credentials that are connected.
-
-    Returns a list of accounts with their names and associated credentials.
-    Use this to see which accounts are connected and what credentials they have."""
-
-    try:
-        client = await hummingbot_client.get_client()
-        accounts = await client.accounts.list_accounts()
-        tasks = [client.accounts.list_account_credentials(account) for account in accounts]
-        credentials_list = await asyncio.gather(*tasks)
-        result = {account: credentials for account, credentials in zip(accounts, credentials_list)}
-        return f"Accounts and Credentials: {result}"
-    except HBConnectionError as e:
-        logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 # Trading Tools
 
