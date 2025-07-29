@@ -6,9 +6,9 @@ import asyncio
 from typing import Optional
 from hummingbot_api_client import HummingbotAPIClient
 
-from ..config.settings import settings
+from mcp_hummingbot.settings import settings
 import logging
-from ..exceptions import MaxConnectionsAttemptError
+from mcp_hummingbot.exceptions import MaxConnectionsAttemptError
 
 logger = logging.getLogger("hummingbot-mcp")
 
