@@ -3,8 +3,7 @@ Configuration settings for Hummingbot MCP Server
 """
 
 import os
-from typing import Optional
-from pydantic import BaseModel, Field, validator, field_validator
+from pydantic import BaseModel, Field, field_validator
 import aiohttp
 
 from mcp_hummingbot.exceptions import ConfigurationError
