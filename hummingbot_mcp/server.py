@@ -5,7 +5,7 @@ Main MCP server for Hummingbot API integration
 import asyncio
 import logging
 import sys
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -390,11 +390,14 @@ async def manage_controller_configs(
     config_data: dict[str, Any] | None = None,
 ) -> str:
     """
-    Manage controller configurations for Hummingbot MCP. If action is 'list', it will return all controller configs.
-    If action is 'get', it will return the config for the given config_name. If action is 'upsert', it will update
-    the config for the given config_name with the provided config_data, creating it if it doesn't exist, is important
-    to know that the config_name should be the same as the value of 'id' in the config data. If action is 'delete',
-    it will delete the config for the given config_name.
+    Manage controller configurations for Hummingbot MCP. If action is
+    - 'list': will return all controller configs.
+    - 'get': will return the config for the given config_name.
+    - 'upsert': will create a controller config (if it doesn't exist) or update the config for the given config_name
+    with the provided config_data, is important to know that the config_name should be the same as the value of 'id'
+    in the config data. In order to create a config properly you can use the 'get' action to get the controller code
+    and understand how to configure it.
+    - 'delete': will delete the config for the given config_name.
     Args:
         action: Action to perform ('list', 'get', 'upsert', 'delete')
         config_name: Name of the controller config to manage (required for 'get', 'upsert', 'delete')
@@ -415,7 +418,7 @@ async def manage_controller_configs(
                 raise ValueError("config_name and config_data are required for 'upsert' action")
             if "id" not in config_data or config_data["id"] != config_name:
                 config_data["id"] = config_name
-            result = await client.controllers.create_or_update_controller_config(config_data)
+            result = await client.controllers.create_or_update_controller_config(config_name, config_data)
             return f"Controller Config Upserted: {result}"
         elif action == "delete":
             if not config_name:
@@ -423,6 +426,48 @@ async def manage_controller_configs(
             result = await client.controllers.delete_controller_config(config_name)
             await client.bot_orchestration.deploy_v2_controllers()
             return f"Controller Config Deleted: {result}"
+        else:
+            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+@mcp.tool()
+async def manage_controllers(
+        action: Literal["list", "get", "upsert", "delete"],
+        controller_type: Optional[Literal["directional_trading", "market_making", "generic"]] = None,
+        controller_name: Optional[str] = None,
+        controller_code: Optional[str] = None,
+) -> str:
+    """
+    Manage controller files (controllers are substrategies).
+    If action is:
+    - 'list': will show all the controllers available by type.
+    - 'get': will get the code of the controller, this will be really useful when trying to create a controller.
+    configuration since you can understand how each parameter is used.
+    - 'upsert': you can modify the code of a controller or add it if it doesn't exist.
+    - 'delete': delete a controller
+
+    Args:
+        action: Action to perform ('list', 'get', 'upsert', 'delete')
+        controller_type: ("directional_trading", "market_making", "generic") is required for the actions 'get', 'upsert' and 'delete'.
+        controller_name: Name of the controller to manage (required for 'get', 'upsert', 'delete')
+        controller_code: Code to update, only required for the action 'upsert'.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if action == "list":
+            result = await client.controllers.list_controllers()
+            return f"Available controllers: {result}"
+        elif action == "get":
+            result = await client.controllers.get_controller(controller_type, controller_name)
+            return f"Controller code: {result}"
+        elif action == "upsert":
+            result = await client.controllers.create_or_update_controller(controller_type, controller_name, controller_code)
+            return f"Upsert operation: {result}"
+        elif action == "delete":
+            result = await client.controllers.delete_controller(controller_type, controller_name)
+            return f"Delete operation: {result}"
         else:
             raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
     except HBConnectionError as e:
