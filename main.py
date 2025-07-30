@@ -4,12 +4,12 @@ Entry point for the Hummingbot MCP Server
 """
 
 import asyncio
+
 from dotenv import load_dotenv
 
-# Load environment variables before importing anything else
-load_dotenv()
+from hummingbot_mcp import main
 
-from mcp_hummingbot import main
+load_dotenv()
 
 if __name__ == "__main__":
     asyncio.run(main())

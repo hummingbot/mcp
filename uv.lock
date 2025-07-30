@@ -266,6 +266,29 @@ wheels = [
 ]
 
 [[package]]
+name = "hummingbot-mcp"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "hummingbot-api-client" },
+    { name = "mcp", extra = ["cli"] },
+    { name = "pandas" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.11.16" },
+    { name = "hummingbot-api-client", specifier = "==1.1.2" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pydantic", specifier = ">=2.11.2" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+]
+
+[[package]]
 name = "idna"
 version = "3.10"
 source = { registry = "https://pypi.org/simple" }
@@ -309,29 +332,6 @@ wheels = [
 cli = [
     { name = "python-dotenv" },
     { name = "typer" },
-]
-
-[[package]]
-name = "mcp-hummingbot"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "hummingbot-api-client" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "pandas" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.11.16" },
-    { name = "hummingbot-api-client", specifier = "==1.1.2" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "pydantic", specifier = ">=2.11.2" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 
 [[package]]
