@@ -1,39 +1,30 @@
-# Use a Python image with uv pre-installed
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
-
-# Install the project into `/app`
+# Stage 1: Dependencies
+FROM python:3.12-slim AS deps
 WORKDIR /app
+RUN apt-get update && apt-get install -y git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    pip install uv
+COPY pyproject.toml uv.lock ./
+RUN uv venv && uv pip install .
 
-# Enable bytecode compilation
-ENV UV_COMPILE_BYTECODE=1
-
-# Copy from the cache instead of linking since it's a mounted volume
-ENV UV_LINK_MODE=copy
-
-# Install the project's dependencies using the lockfile and settings
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev --no-editable
-
-# Then, add the rest of the project source code and install it
-# Installing separately from its dependencies allows optimal layer caching
-ADD . /app
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
-
-FROM python:3.12-slim-bookworm
-
-# Install system dependencies if needed
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-
+# Stage 2: Runtime
+FROM python:3.12-slim
 WORKDIR /app
- 
-COPY --from=uv /root/.local /root/.local
-COPY --from=uv --chown=app:app /app/.venv /app/.venv
+RUN apt-get update && apt-get install -y git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    pip install uv
 
-# Place executables in the environment at the front of the path
-ENV PATH="/app/.venv/bin:$PATH"
+# Copy the virtual environment from the deps stage
+COPY --from=deps /app/.venv /app/.venv
 
-# The entrypoint should be the mcp-hummingbot command from pyproject.toml scripts
-ENTRYPOINT ["mcp-hummingbot"]
+# Copy source code
+COPY hummingbot_mcp/ ./hummingbot_mcp/
+COPY README.md ./
+COPY main.py ./
+COPY pyproject.toml ./
+
+# Set environment variable to indicate we're running in Docker
+ENV DOCKER_CONTAINER=true
+
+# Run the MCP server using the pre-built venv
+ENTRYPOINT ["/app/.venv/bin/python", "main.py"]

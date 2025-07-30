@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mcp-hummingbot": {
+      "type": "stdio",
+      "command": "/Users/dman/.local/bin/uv",
+      "args": [
+        "--directory",
+        "/Users/dman/Documents/code/mcp",
+        "run",
+        "main.py"
+      ],
+      "env": {
+      }
+    }
+  }
+}

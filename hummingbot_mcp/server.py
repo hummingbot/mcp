@@ -3,23 +3,22 @@ Main MCP server for Hummingbot API integration
 """
 
 import asyncio
-from typing import Dict, Any, Optional, List, Literal
+import logging
+import sys
+from typing import Any, Literal, Optional
 
 from mcp.server.fastmcp import FastMCP
-from mcp_hummingbot.settings import settings
-from mcp_hummingbot.hummingbot_client import hummingbot_client
-from mcp_hummingbot.logging import setup_logging
-from mcp_hummingbot.exceptions import ToolError, MaxConnectionsAttemptError as HBConnectionError
-from mcp_hummingbot.tools.account import SetupConnectorRequest
-import logging
+
+from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
+from hummingbot_mcp.hummingbot_client import hummingbot_client
+from hummingbot_mcp.settings import settings
+from hummingbot_mcp.tools.account import SetupConnectorRequest
 
 # Configure root logger
 logging.basicConfig(
     level="INFO",
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stderr)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
 )
 logger = logging.getLogger("hummingbot-mcp")
 
@@ -29,21 +28,22 @@ mcp = FastMCP("hummingbot-mcp")
 
 # Account Management Tools
 
+
 @mcp.tool()
 async def setup_connector(
-        connector: Optional[str] = None,
-        credentials: Optional[Dict[str, Any]] = None,
-        account: Optional[str] = None,
-        confirm_override: Optional[bool] = None
+    connector: str | None = None,
+    credentials: dict[str, Any] | None = None,
+    account: str | None = None,
+    confirm_override: bool | None = None,
 ) -> str:
     """Setup a new exchange connector for an account with credentials using progressive disclosure.
-    
+
     This tool guides you through the entire process of connecting an exchange with a four-step flow:
     1. No parameters → List available exchanges
-    2. Connector only → Show required credential fields  
+    2. Connector only → Show required credential fields
     3. Connector + credentials, no account → Select account from available accounts
     4. All parameters → Connect the exchange (with override confirmation if needed)
-    
+
     Args:
         connector: Exchange connector name (e.g., 'binance', 'binance_perpetual'). Leave empty to list available connectors.
         credentials: Credentials object with required fields for the connector. Leave empty to see required fields first.
@@ -53,64 +53,21 @@ async def setup_connector(
     try:
         # Create and validate request using Pydantic model
         request = SetupConnectorRequest(
-            connector=connector,
-            credentials=credentials,
-            account=account,
-            confirm_override=confirm_override
+            connector=connector, credentials=credentials, account=account, confirm_override=confirm_override
         )
 
         from .tools.account import setup_connector as setup_connector_impl
+
         result = await setup_connector_impl(request)
         return f"Setup Connector Result: {result}"
     except Exception as e:
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
 
-
 @mcp.tool()
-async def create_delete_accounts(
-        action: str,
-        account_name: Optional[str] = None,
-        credential: Optional[str] = None,
+async def get_portfolio_balances(
+    account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
 ) -> str:
-    """
-    Create or delete an account. Important: Deleting an account will remove all associated credentials and data, and
-    the master_account cannot be deleted.
-    If a credential is provided, only the credential for the account will be deleted
-    Args:
-        action: Action to perform ('create' or 'delete')
-        account_name: Name of the account to create or delete. Required for 'create' and optional for 'delete'.
-    """
-    try:
-        client = await hummingbot_client.get_client()
-        if action == "create":
-            if not account_name:
-                raise ValueError("Account name is required for creating an account")
-            result = await client.accounts.add_account(account_name)
-            return f"Account '{account_name}' created successfully: {result}"
-        elif action == "delete":
-            if not account_name:
-                raise ValueError("Account name is required for deleting an account")
-            if account_name == settings.default_account:
-                raise ValueError("Cannot delete the master account")
-            if credential is not None:
-                # If credential is provided, delete only the credential for the account
-                result = await client.accounts.delete_credential(account_name, credential)
-                return f"Credential '{credential}' for account '{account_name}' deleted successfully: {result}"
-            result = await client.accounts.delete_account(account_name)
-            return f"Account '{account_name}' deleted successfully: {result}"
-        else:
-            raise ValueError("Invalid action. Must be 'create' or 'delete'.")
-    except HBConnectionError as e:
-        logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError(
-            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
-
-
-@mcp.tool()
-async def get_portfolio_balances(account_names: Optional[List[str]] = None,
-                                 connector_names: Optional[List[str]] = None,
-                                 as_distribution: bool = False) -> str:
     """Get portfolio balances and holdings across all connected exchanges.
 
     Returns detailed token balances, values, and available units for each account. Use this to check your portfolio,
@@ -130,8 +87,7 @@ async def get_portfolio_balances(account_names: Optional[List[str]] = None,
         client = await hummingbot_client.get_client()
         if as_distribution:
             # Get portfolio distribution
-            result = await client.portfolio.get_distribution(account_names=account_names,
-                                                             connector_names=connector_names)
+            result = await client.portfolio.get_distribution(account_names=account_names, connector_names=connector_names)
             return f"Portfolio Distribution: {result}"
         account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
         return f"Account State: {account_info}"
@@ -142,16 +98,17 @@ async def get_portfolio_balances(account_names: Optional[List[str]] = None,
 
 # Trading Tools
 
+
 @mcp.tool()
 async def place_order(
-        connector_name: str,
-        trading_pair: str,
-        trade_type: str,
-        amount: str,
-        price: Optional[str] = None,
-        order_type: str = "MARKET",
-        position_action: Optional[str] = "OPEN",
-        account_name: Optional[str] = "master_account"
+    connector_name: str,
+    trading_pair: str,
+    trade_type: str,
+    amount: str,
+    price: str | None = None,
+    order_type: str = "MARKET",
+    position_action: str | None = "OPEN",
+    account_name: str | None = "master_account",
 ) -> str:
     """Place a buy or sell order (supports USD values by adding at the start of the amount $).
 
@@ -182,7 +139,7 @@ async def place_order(
             amount=amount,
             order_type=order_type,
             price=price,
-            position_action=position_action
+            position_action=position_action,
         )
         return f"Order Result: {result}"
     except Exception as e:
@@ -192,11 +149,11 @@ async def place_order(
 
 @mcp.tool()
 async def set_account_position_mode_and_leverage(
-        account_name: str,
-        connector_name: str,
-        trading_pair: Optional[str] = None,
-        position_mode: Optional[str] = None,
-        leverage: Optional[int] = None
+    account_name: str,
+    connector_name: str,
+    trading_pair: str | None = None,
+    position_mode: str | None = None,
+    leverage: int | None = None,
 ) -> str:
     """Set position mode and leverage for an account on a specific exchange. If position mode is not specified, will only
     set the leverage. If leverage is not specified, will only set the position mode.
@@ -219,9 +176,7 @@ async def set_account_position_mode_and_leverage(
             if position_mode not in ["HEDGE", "ONE-WAY"]:
                 raise ValueError("Invalid position mode. Must be 'HEDGE' or 'ONE-WAY'")
             position_mode_result = await client.trading.set_position_mode(
-                account_name=account_name,
-                connector_name=connector_name,
-                position_mode=position_mode
+                account_name=account_name, connector_name=connector_name, position_mode=position_mode
             )
             response += f"Position Mode Set: {position_mode_result}\n"
         if leverage is not None:
@@ -230,10 +185,7 @@ async def set_account_position_mode_and_leverage(
             if trading_pair is None:
                 raise ValueError("Trading_pair must be specified")
             leverage_result = await client.trading.set_leverage(
-                account_name=account_name,
-                connector_name=connector_name,
-                trading_pair=trading_pair,
-                leverage=leverage
+                account_name=account_name, connector_name=connector_name, trading_pair=trading_pair, leverage=leverage
             )
             response += f"Leverage Set: {leverage_result}\n"
         return f"{response.strip()}"
@@ -244,17 +196,17 @@ async def set_account_position_mode_and_leverage(
 
 @mcp.tool()
 async def get_orders(
-        account_names: Optional[List[str]] = None,
-        connector_names: Optional[List[str]] = None,
-        trading_pairs: Optional[List[str]] = None,
-        status: Optional[Literal["OPEN", "FILLED", "CANCELED", "FAILED"]] = None,
-        start_time: Optional[int] = None,
-        end_time: Optional[int] = None,
-        limit: Optional[int] = 500,
-        cursor: Optional[str] = None
+    account_names: list[str] | None = None,
+    connector_names: list[str] | None = None,
+    trading_pairs: list[str] | None = None,
+    status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+    limit: int | None = 500,
+    cursor: str | None = None,
 ) -> str:
     """Get the orders manged by the connected accounts.
-    
+
     Args:
         account_names: List of account names to filter by (optional). If empty, returns all accounts.
         connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
@@ -269,8 +221,14 @@ async def get_orders(
     try:
         client = await hummingbot_client.get_client()
         result = await client.trading.search_orders(
-            account_names=account_names, connector_names=connector_names, trading_pairs=trading_pairs,
-            status=status, start_time=start_time, end_time=end_time, limit=limit, cursor=cursor
+            account_names=account_names,
+            connector_names=connector_names,
+            trading_pairs=trading_pairs,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            cursor=cursor,
         )
         return f"Order Management Result: {result}"
     except Exception as e:
@@ -280,9 +238,7 @@ async def get_orders(
 
 @mcp.tool()
 async def get_positions(
-        account_names: Optional[List[str]] = None,
-        connector_names: Optional[List[str]] = None,
-        limit: Optional[int] = 100
+    account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
 ) -> str:
     """Get the positions managed by the connected accounts.
 
@@ -293,20 +249,18 @@ async def get_positions(
     """
     try:
         client = await hummingbot_client.get_client()
-        result = await client.trading.get_positions(
-            account_names=account_names, connector_names=connector_names, limit=limit
-        )
+        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names, limit=limit)
         return f"Position Management Result: {result}"
     except Exception as e:
         logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage positions: {str(e)}")
 
+
 # Market Data Tools
 
+
 @mcp.tool()
-async def get_prices(
-        connector_name: str,
-        trading_pairs: List[str]) -> str:
+async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
     """Get the latest prices for the specified trading pairs on a specific exchange connector.
     Args:
         connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
@@ -320,12 +274,9 @@ async def get_prices(
         logger.error(f"get_prices failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get prices: {str(e)}")
 
+
 @mcp.tool()
-async def get_candles(
-        connector_name: str,
-        trading_pair: str,
-        interval: str = "1h",
-        days: int = 30) -> str:
+async def get_candles(connector_name: str, trading_pair: str, interval: str = "1h", days: int = 30) -> str:
     """Get the real-time candles for a trading pair on a specific exchange connector.
     Args:
         connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
@@ -337,10 +288,12 @@ async def get_candles(
         client = await hummingbot_client.get_client()
         available_candles_connectors = await client.market_data.get_available_candle_connectors()
         if connector_name not in available_candles_connectors:
-            raise ValueError(f"Connector '{connector_name}' does not support candle data. Available connectors: {available_candles_connectors}")
+            raise ValueError(
+                f"Connector '{connector_name}' does not support candle data. Available connectors: {available_candles_connectors}"
+            )
         # Determine max records based on interval "m" is minute, "s" is second, "h" is hour, "d" is day, "w" is week
         if interval.endswith("m"):
-            max_records = 1440 * days # 1440 minutes in a day
+            max_records = 1440 * days  # 1440 minutes in a day
         elif interval.endswith("h"):
             max_records = 24 * days
         elif interval.endswith("d"):
@@ -352,20 +305,16 @@ async def get_candles(
         max_records = int(max_records / int(interval[:-1])) if interval[:-1] else max_records
 
         candles = await client.market_data.get_candles(
-            connector_name=connector_name,
-            trading_pair=trading_pair,
-            interval=interval,
-            max_records=max_records
+            connector_name=connector_name, trading_pair=trading_pair, interval=interval, max_records=max_records
         )
         return f"Candle results: {candles}"
     except Exception as e:
         logger.error(f"get_candles failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get candles: {str(e)}")
 
+
 @mcp.tool()
-async def get_funding_rate(
-        connector_name: str,
-        trading_pair: str) -> str:
+async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
     """Get the latest funding rate for a trading pair on a specific exchange connector. Only works for perpetual
     connectors so the connector name must have _perpetual in it.
     Args:
@@ -375,27 +324,34 @@ async def get_funding_rate(
     try:
         client = await hummingbot_client.get_client()
         if "_perpetual" not in connector_name:
-            raise ValueError(f"Connector '{connector_name}' is not a perpetual connector. Funding rates are only available for perpetual connectors.")
+            raise ValueError(
+                f"Connector '{connector_name}' is not a perpetual connector. Funding rates are only available for"
+                f"perpetual connectors."
+            )
         funding_rate = await client.market_data.get_funding_info(connector_name=connector_name, trading_pair=trading_pair)
         return f"Funding Rate: {funding_rate}"
     except Exception as e:
         logger.error(f"get_funding_rate failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get funding rate: {str(e)}")
 
+
 @mcp.tool()
 async def get_order_book(
-        connector_name: str,
-        trading_pair: str,
-        query_type: Literal["snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
-        query_value: Optional[float] = None,
+    connector_name: str,
+    trading_pair: str,
+    query_type: Literal["snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
+    query_value: float | None = None,
+    is_buy: bool = True,
 ) -> str:
-    """Get order book data for a trading pair on a specific exchange connector, if the typ
-    
+    """Get order book data for a trading pair on a specific exchange connector, if the query type is different than
+    snapshot, you need to provide query_value and is_buy
     Args:
         connector_name: Connector name (e.g., 'binance', 'binance_perpetual')
         trading_pair: Trading pair (e.g., BTC-USDT)
-        query_type: Order book query type ('snapshot', 'volume_for_price', 'price_for_volume', 'quote_volume_for_price', 'price_for_quote_volume')
+        query_type: Order book query type ('snapshot', 'volume_for_price', 'price_for_volume', 'quote_volume_for_price',
+        'price_for_quote_volume')
         query_value: Only required if query_type is not 'snapshot'. The value to query against the order book.
+        is_buy: Only required if query_type is not 'snapshot'. Is important to see what orders of the book analyze.
     """
     try:
         client = await hummingbot_client.get_client()
@@ -406,19 +362,154 @@ async def get_order_book(
             if query_value is None:
                 raise ValueError(f"query_value must be provided for query_type '{query_type}'")
             if query_type == "volume_for_price":
-                result = await client.market_data.get_volume_for_price(connector_name=connector_name, trading_pair=trading_pair, price=query_value)
+                result = await client.market_data.get_volume_for_price(
+                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
+                )
             elif query_type == "price_for_volume":
-                result = await client.market_data.get_price_for_volume(connector_name=connector_name, trading_pair=trading_pair, volume=query_value)
+                result = await client.market_data.get_price_for_volume(
+                    connector_name=connector_name, trading_pair=trading_pair, volume=query_value, is_buy=is_buy
+                )
             elif query_type == "quote_volume_for_price":
-                result = await client.market_data.get_quote_volume_for_price(connector_name=connector_name, trading_pair=trading_pair, price=query_value)
+                result = await client.market_data.get_quote_volume_for_price(
+                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
+                )
             elif query_type == "price_for_quote_volume":
-                result = await client.market_data.get_price_for_quote_volume(connector_name=connector_name, trading_pair=trading_pair, quote_volume=query_value)
+                result = await client.market_data.get_price_for_quote_volume(
+                    connector_name=connector_name, trading_pair=trading_pair, quote_volume=query_value, is_buy=is_buy
+                )
             else:
                 raise ValueError(f"Unsupported query type: {query_type}")
             return f"Order Book Query Result: {result}"
     except Exception as e:
         logger.error(f"get_market_data failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get market data: {str(e)}")
+
+
+@mcp.tool()
+async def manage_controller_configs(
+    action: Literal["list", "get", "upsert", "delete"],
+    config_name: str | None = None,
+    config_data: dict[str, Any] | None = None,
+) -> str:
+    """
+    Manage controller configurations for Hummingbot MCP. If action is
+    - 'list': will return all controller configs.
+    - 'get': will return the config for the given config_name.
+    - 'upsert': will create a controller config (if it doesn't exist) or update the config for the given config_name
+    with the provided config_data, is important to know that the config_name should be the same as the value of 'id'
+    in the config data. In order to create a config properly you can use the 'get' action to get the controller code
+    and understand how to configure it.
+    - 'delete': will delete the config for the given config_name.
+    Args:
+        action: Action to perform ('list', 'get', 'upsert', 'delete')
+        config_name: Name of the controller config to manage (required for 'get', 'upsert', 'delete')
+        config_data: Data for the controller config (required for 'upsert')
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if action == "list":
+            configs = await client.controllers.list_controller_configs()
+            return f"Controller Configs: {configs}"
+        elif action == "get":
+            if not config_name:
+                raise ValueError("config_name is required for 'get' action")
+            config = await client.controllers.get_controller_config(config_name)
+            return f"Controller Config: {config}"
+        elif action == "upsert":
+            if not config_name or not config_data:
+                raise ValueError("config_name and config_data are required for 'upsert' action")
+            if "id" not in config_data or config_data["id"] != config_name:
+                config_data["id"] = config_name
+            result = await client.controllers.create_or_update_controller_config(config_name, config_data)
+            return f"Controller Config Upserted: {result}"
+        elif action == "delete":
+            if not config_name:
+                raise ValueError("config_name is required for 'delete' action")
+            result = await client.controllers.delete_controller_config(config_name)
+            await client.bot_orchestration.deploy_v2_controllers()
+            return f"Controller Config Deleted: {result}"
+        else:
+            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+@mcp.tool()
+async def manage_controllers(
+        action: Literal["list", "get", "upsert", "delete"],
+        controller_type: Optional[Literal["directional_trading", "market_making", "generic"]] = None,
+        controller_name: Optional[str] = None,
+        controller_code: Optional[str] = None,
+) -> str:
+    """
+    Manage controller files (controllers are substrategies).
+    If action is:
+    - 'list': will show all the controllers available by type.
+    - 'get': will get the code of the controller, this will be really useful when trying to create a controller.
+    configuration since you can understand how each parameter is used.
+    - 'upsert': you can modify the code of a controller or add it if it doesn't exist.
+    - 'delete': delete a controller
+
+    Args:
+        action: Action to perform ('list', 'get', 'upsert', 'delete')
+        controller_type: ("directional_trading", "market_making", "generic") is required for the actions 'get', 'upsert' and 'delete'.
+        controller_name: Name of the controller to manage (required for 'get', 'upsert', 'delete')
+        controller_code: Code to update, only required for the action 'upsert'.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if action == "list":
+            result = await client.controllers.list_controllers()
+            return f"Available controllers: {result}"
+        elif action == "get":
+            result = await client.controllers.get_controller(controller_type, controller_name)
+            return f"Controller code: {result}"
+        elif action == "upsert":
+            result = await client.controllers.create_or_update_controller(controller_type, controller_name, controller_code)
+            return f"Upsert operation: {result}"
+        elif action == "delete":
+            result = await client.controllers.delete_controller(controller_type, controller_name)
+            return f"Delete operation: {result}"
+        else:
+            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+
+@mcp.tool()
+async def deploy_bot_with_controllers(
+    bot_name: str,
+    controller_configs: list[str],
+    account_name: str | None = "master_account",
+    max_global_drawdown_quote: float | None = None,
+    max_controller_drawdown_quote: float | None = None,
+    image: str = "hummingbot/hummingbot:latest",
+) -> str:
+    """Deploy a bot with specified controller configurations.
+    Args:
+        bot_name: Name of the bot to deploy
+        controller_configs: List of controller configs to use for the bot deployment.
+        account_name: Account name to use for the bot (default: master_account)
+        max_global_drawdown_quote: Maximum global drawdown in quote currency (optional) defaults to None.
+        max_controller_drawdown_quote: Maximum drawdown per controller in quote currency (optional) defaults to None.
+        image: Docker image to use for the bot (default: "hummingbot/hummingbot:latest")
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        # Validate controller configs
+        result = await client.bot_orchestration.deploy_v2_controllers(
+            instance_name=bot_name,
+            controller_configs=controller_configs,
+            credentials_profile=account_name,
+            max_global_drawdown_quote=max_global_drawdown_quote,
+            max_controller_drawdown_quote=max_controller_drawdown_quote,
+            image=image,
+        )
+        return f"Bot Deployment Result: {result}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 
 async def main():
