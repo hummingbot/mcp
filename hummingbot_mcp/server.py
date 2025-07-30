@@ -341,15 +341,17 @@ async def get_order_book(
     trading_pair: str,
     query_type: Literal["snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
     query_value: float | None = None,
+    is_buy: bool = True,
 ) -> str:
-    """Get order book data for a trading pair on a specific exchange connector, if the typ
-
+    """Get order book data for a trading pair on a specific exchange connector, if the query type is different than
+    snapshot, you need to provide query_value and is_buy
     Args:
         connector_name: Connector name (e.g., 'binance', 'binance_perpetual')
         trading_pair: Trading pair (e.g., BTC-USDT)
         query_type: Order book query type ('snapshot', 'volume_for_price', 'price_for_volume', 'quote_volume_for_price',
         'price_for_quote_volume')
         query_value: Only required if query_type is not 'snapshot'. The value to query against the order book.
+        is_buy: Only required if query_type is not 'snapshot'. Is important to see what orders of the book analyze.
     """
     try:
         client = await hummingbot_client.get_client()
@@ -361,19 +363,19 @@ async def get_order_book(
                 raise ValueError(f"query_value must be provided for query_type '{query_type}'")
             if query_type == "volume_for_price":
                 result = await client.market_data.get_volume_for_price(
-                    connector_name=connector_name, trading_pair=trading_pair, price=query_value
+                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
                 )
             elif query_type == "price_for_volume":
                 result = await client.market_data.get_price_for_volume(
-                    connector_name=connector_name, trading_pair=trading_pair, volume=query_value
+                    connector_name=connector_name, trading_pair=trading_pair, volume=query_value, is_buy=is_buy
                 )
             elif query_type == "quote_volume_for_price":
                 result = await client.market_data.get_quote_volume_for_price(
-                    connector_name=connector_name, trading_pair=trading_pair, price=query_value
+                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
                 )
             elif query_type == "price_for_quote_volume":
                 result = await client.market_data.get_price_for_quote_volume(
-                    connector_name=connector_name, trading_pair=trading_pair, quote_volume=query_value
+                    connector_name=connector_name, trading_pair=trading_pair, quote_volume=query_value, is_buy=is_buy
                 )
             else:
                 raise ValueError(f"Unsupported query type: {query_type}")
