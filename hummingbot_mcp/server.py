@@ -64,47 +64,6 @@ async def setup_connector(
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
 
-
-@mcp.tool()
-async def create_or_delete_accounts(
-    action: str,
-    account_name: str | None = None,
-    credential: str | None = None,
-) -> str:
-    """
-    Create or delete an account. Important: Deleting an account will remove all associated credentials and data, and
-    the master_account cannot be deleted.
-    If a credential is provided, only the credential for the account will be deleted
-    Args:
-        action: Action to perform ('create' or 'delete')
-        account_name: Name of the account to create or delete. Required for 'create' and optional for 'delete'.
-        credential: Credential name to delete for the account. If provided, only the credential will be deleted.
-    """
-    try:
-        client = await hummingbot_client.get_client()
-        if action == "create":
-            if not account_name:
-                raise ValueError("Account name is required for creating an account")
-            result = await client.accounts.add_account(account_name)
-            return f"Account '{account_name}' created successfully: {result}"
-        elif action == "delete":
-            if not account_name:
-                raise ValueError("Account name is required for deleting an account")
-            if account_name == settings.default_account:
-                raise ValueError("Cannot delete the master account")
-            if credential is not None:
-                # If credential is provided, delete only the credential for the account
-                result = await client.accounts.delete_credential(account_name, credential)
-                return f"Credential '{credential}' for account '{account_name}' deleted successfully: {result}"
-            result = await client.accounts.delete_account(account_name)
-            return f"Account '{account_name}' deleted successfully: {result}"
-        else:
-            raise ValueError("Invalid action. Must be 'create' or 'delete'.")
-    except HBConnectionError as e:
-        logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
-
-
 @mcp.tool()
 async def get_portfolio_balances(
     account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
