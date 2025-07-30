@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "hummingbot-mcp-docker": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network", "host",
+        "-e", "HUMMINGBOT_API_URL=http://localhost:8000",
+        "-e", "HUMMINGBOT_USERNAME=admin",
+        "-e", "HUMMINGBOT_PASSWORD=admin",
+        "dardonacci/hummingbot-mcp:latest"
+      ],
+      "description": "Hummingbot MCP server for interacting with Hummingbot API"
+    }
+  }
+}
