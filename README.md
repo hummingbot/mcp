@@ -109,8 +109,9 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
 
 3. **Create a docker-compose.yml**:
    ```yaml
-     services:
+   services:
      hummingbot-api:
+       container_name: hummingbot-api
        image: hummingbot/hummingbot-api:latest
        ports:
          - "8000:8000"
@@ -128,6 +129,7 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
          - postgres
    
      mcp-server:
+       container_name: hummingbot-mcp
        image: hummingbot/hummingbot-mcp:latest
        stdin_open: true
        tty: true
@@ -207,6 +209,31 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
 4. **Deploy**:
    ```bash
    docker compose up -d
+   ```
+
+5. **Configure in Claude Code or Gemini CLI to connect to existing container**:
+   ```json
+   {
+     "mcpServers": {
+       "hummingbot-mcp": {
+         "type": "stdio",
+         "command": "docker",
+         "args": [
+           "exec",
+           "-i",
+           "hummingbot-mcp",
+           "uv",
+           "run",
+           "main.py"
+         ]
+       }
+     }
+   }
+   ```
+   
+   **Note**: Replace `mcp_mcp-server_1` with your actual container name. You can find the container name by running:
+   ```bash
+   docker ps
    ```
 
 ## Environment Variables
