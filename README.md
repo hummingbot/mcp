@@ -231,7 +231,7 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
    }
    ```
    
-   **Note**: Replace `mcp_mcp-server_1` with your actual container name. You can find the container name by running:
+   **Note**: Replace `hummingbot-mcp` with your actual container name. You can find the container name by running:
    ```bash
    docker ps
    ```
