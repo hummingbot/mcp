@@ -420,6 +420,87 @@ async def get_order_book(
         logger.error(f"get_market_data failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get market data: {str(e)}")
 
+@mcp.tool()
+async def manage_controller_configs(
+        action: Literal["list", "get", "upsert", "delete"],
+        config_name: Optional[str] = None,
+        config_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Manage controller configurations for Hummingbot MCP. If action is 'list', it will return all controller configs.
+    If action is 'get', it will return the config for the given config_name. If action is 'upsert', it will update
+    the config for the given config_name with the provided config_data, creating it if it doesn't exist, is important
+    to know that the config_name should be the same as the value of 'id' in the config data. If action is 'delete',
+    it will delete the config for the given config_name.
+    Args:
+        action: Action to perform ('list', 'get', 'upsert', 'delete')
+        config_name: Name of the controller config to manage (required for 'get', 'upsert', 'delete')
+        config_data: Data for the controller config (required for 'upsert')
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if action == "list":
+            configs = await client.controllers.list_controller_configs()
+            return f"Controller Configs: {configs}"
+        elif action == "get":
+            if not config_name:
+                raise ValueError("config_name is required for 'get' action")
+            config = await client.controllers.get_controller_config(config_name)
+            return f"Controller Config: {config}"
+        elif action == "upsert":
+            if not config_name or not config_data:
+                raise ValueError("config_name and config_data are required for 'upsert' action")
+            if "id" not in config_data or config_data["id"] != config_name:
+                config_data["id"] = config_name
+            result = await client.controllers.create_or_update_controller_config(config_data)
+            return f"Controller Config Upserted: {result}"
+        elif action == "delete":
+            if not config_name:
+                raise ValueError("config_name is required for 'delete' action")
+            result = await client.controllers.delete_controller_config(config_name)
+            await client.bot_orchestration.deploy_v2_controllers()
+            return f"Controller Config Deleted: {result}"
+        else:
+            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+@mcp.tool()
+async def deploy_bot_with_controllers(
+        bot_name: str,
+        controller_configs: List[str],
+        account_name: Optional[str] = "master_account",
+        max_global_drawdown_quote: Optional[float] = None,
+        max_controller_drawdown_quote: Optional[float] = None,
+        image: str = "hummingbot/hummingbot:latest"
+) -> str:
+    """Deploy a bot with specified controller configurations.
+    Args:
+        bot_name: Name of the bot to deploy
+        controller_configs: List of controller configs to use for the bot deployment.
+        account_name: Account name to use for the bot (default: master_account)
+        max_global_drawdown_quote: Maximum global drawdown in quote currency (optional) defaults to None.
+        max_controller_drawdown_quote: Maximum drawdown per controller in quote currency (optional) defaults to None.
+        image: Docker image to use for the bot (default: "hummingbot/hummingbot:latest")
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        # Validate controller configs
+        result = await client.bot_orchestration.deploy_v2_controllers(
+            instance_name=bot_name,
+            controller_configs=controller_configs,
+            credentials_profile=account_name,
+            max_global_drawdown_quote=max_global_drawdown_quote,
+            max_controller_drawdown_quote=max_controller_drawdown_quote,
+            image=image
+        )
+        return f"Bot Deployment Result: {result}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 async def main():
     """Run the MCP server"""
