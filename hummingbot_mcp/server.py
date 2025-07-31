@@ -511,6 +511,19 @@ async def deploy_bot_with_controllers(
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
+@mcp.tool()
+async def get_active_bots_status():
+    """
+    Get the status of all active bots. Including the unrealized PnL, realized PnL, volume traded, latest logs, etc.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        active_bots = await client.bot_orchestration.get_active_bots_status()
+        return f"Active Bots Status: {active_bots}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
 
 async def main():
     """Run the MCP server"""
