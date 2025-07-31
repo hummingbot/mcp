@@ -31,10 +31,10 @@ mcp = FastMCP("hummingbot-mcp")
 
 @mcp.tool()
 async def setup_connector(
-    connector: str | None = None,
-    credentials: dict[str, Any] | None = None,
-    account: str | None = None,
-    confirm_override: bool | None = None,
+        connector: str | None = None,
+        credentials: dict[str, Any] | None = None,
+        account: str | None = None,
+        confirm_override: bool | None = None,
 ) -> str:
     """Setup a new exchange connector for an account with credentials using progressive disclosure.
 
@@ -64,9 +64,10 @@ async def setup_connector(
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
 
+
 @mcp.tool()
 async def get_portfolio_balances(
-    account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
+        account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
 ) -> str:
     """Get portfolio balances and holdings across all connected exchanges.
 
@@ -87,7 +88,8 @@ async def get_portfolio_balances(
         client = await hummingbot_client.get_client()
         if as_distribution:
             # Get portfolio distribution
-            result = await client.portfolio.get_distribution(account_names=account_names, connector_names=connector_names)
+            result = await client.portfolio.get_distribution(account_names=account_names,
+                                                             connector_names=connector_names)
             return f"Portfolio Distribution: {result}"
         account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
         return f"Account State: {account_info}"
@@ -101,14 +103,14 @@ async def get_portfolio_balances(
 
 @mcp.tool()
 async def place_order(
-    connector_name: str,
-    trading_pair: str,
-    trade_type: str,
-    amount: str,
-    price: str | None = None,
-    order_type: str = "MARKET",
-    position_action: str | None = "OPEN",
-    account_name: str | None = "master_account",
+        connector_name: str,
+        trading_pair: str,
+        trade_type: str,
+        amount: str,
+        price: str | None = None,
+        order_type: str = "MARKET",
+        position_action: str | None = "OPEN",
+        account_name: str | None = "master_account",
 ) -> str:
     """Place a buy or sell order (supports USD values by adding at the start of the amount $).
 
@@ -149,11 +151,11 @@ async def place_order(
 
 @mcp.tool()
 async def set_account_position_mode_and_leverage(
-    account_name: str,
-    connector_name: str,
-    trading_pair: str | None = None,
-    position_mode: str | None = None,
-    leverage: int | None = None,
+        account_name: str,
+        connector_name: str,
+        trading_pair: str | None = None,
+        position_mode: str | None = None,
+        leverage: int | None = None,
 ) -> str:
     """Set position mode and leverage for an account on a specific exchange. If position mode is not specified, will only
     set the leverage. If leverage is not specified, will only set the position mode.
@@ -196,14 +198,14 @@ async def set_account_position_mode_and_leverage(
 
 @mcp.tool()
 async def get_orders(
-    account_names: list[str] | None = None,
-    connector_names: list[str] | None = None,
-    trading_pairs: list[str] | None = None,
-    status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
-    start_time: int | None = None,
-    end_time: int | None = None,
-    limit: int | None = 500,
-    cursor: str | None = None,
+        account_names: list[str] | None = None,
+        connector_names: list[str] | None = None,
+        trading_pairs: list[str] | None = None,
+        status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int | None = 500,
+        cursor: str | None = None,
 ) -> str:
     """Get the orders manged by the connected accounts.
 
@@ -238,7 +240,7 @@ async def get_orders(
 
 @mcp.tool()
 async def get_positions(
-    account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
+        account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
 ) -> str:
     """Get the positions managed by the connected accounts.
 
@@ -249,7 +251,8 @@ async def get_positions(
     """
     try:
         client = await hummingbot_client.get_client()
-        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names, limit=limit)
+        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
+                                                    limit=limit)
         return f"Position Management Result: {result}"
     except Exception as e:
         logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
@@ -301,7 +304,8 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
         elif interval.endswith("w"):
             max_records = 7 * days
         else:
-            raise ValueError(f"Unsupported interval format: {interval}. Use '1m', '5m', '15m', '30m', '1h', '4h', '1d', or '1w'.")
+            raise ValueError(
+                f"Unsupported interval format: {interval}. Use '1m', '5m', '15m', '30m', '1h', '4h', '1d', or '1w'.")
         max_records = int(max_records / int(interval[:-1])) if interval[:-1] else max_records
 
         candles = await client.market_data.get_candles(
@@ -328,7 +332,8 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
                 f"Connector '{connector_name}' is not a perpetual connector. Funding rates are only available for"
                 f"perpetual connectors."
             )
-        funding_rate = await client.market_data.get_funding_info(connector_name=connector_name, trading_pair=trading_pair)
+        funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
+                                                                 trading_pair=trading_pair)
         return f"Funding Rate: {funding_rate}"
     except Exception as e:
         logger.error(f"get_funding_rate failed: {str(e)}", exc_info=True)
@@ -337,11 +342,12 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
 
 @mcp.tool()
 async def get_order_book(
-    connector_name: str,
-    trading_pair: str,
-    query_type: Literal["snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
-    query_value: float | None = None,
-    is_buy: bool = True,
+        connector_name: str,
+        trading_pair: str,
+        query_type: Literal[
+            "snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
+        query_value: float | None = None,
+        is_buy: bool = True,
 ) -> str:
     """Get order book data for a trading pair on a specific exchange connector, if the query type is different than
     snapshot, you need to provide query_value and is_buy
@@ -356,7 +362,8 @@ async def get_order_book(
     try:
         client = await hummingbot_client.get_client()
         if query_type == "snapshot":
-            order_book = await client.market_data.get_order_book(connector_name=connector_name, trading_pair=trading_pair)
+            order_book = await client.market_data.get_order_book(connector_name=connector_name,
+                                                                 trading_pair=trading_pair)
             return f"Order Book Snapshot: {order_book}"
         else:
             if query_value is None:
@@ -387,9 +394,9 @@ async def get_order_book(
 
 @mcp.tool()
 async def manage_controller_configs(
-    action: Literal["list", "get", "upsert", "delete"],
-    config_name: str | None = None,
-    config_data: dict[str, Any] | None = None,
+        action: Literal["list", "get", "upsert", "delete"],
+        config_name: str | None = None,
+        config_data: dict[str, Any] | None = None,
 ) -> str:
     """
     Manage controller configurations for Hummingbot MCP. If action is
@@ -432,7 +439,9 @@ async def manage_controller_configs(
             raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
 
 @mcp.tool()
 async def manage_controllers(
@@ -465,7 +474,8 @@ async def manage_controllers(
             result = await client.controllers.get_controller(controller_type, controller_name)
             return f"Controller code: {result}"
         elif action == "upsert":
-            result = await client.controllers.create_or_update_controller(controller_type, controller_name, controller_code)
+            result = await client.controllers.create_or_update_controller(controller_type, controller_name,
+                                                                          controller_code)
             return f"Upsert operation: {result}"
         elif action == "delete":
             result = await client.controllers.delete_controller(controller_type, controller_name)
@@ -474,17 +484,18 @@ async def manage_controllers(
             raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 
 @mcp.tool()
 async def deploy_bot_with_controllers(
-    bot_name: str,
-    controller_configs: list[str],
-    account_name: str | None = "master_account",
-    max_global_drawdown_quote: float | None = None,
-    max_controller_drawdown_quote: float | None = None,
-    image: str = "hummingbot/hummingbot:latest",
+        bot_name: str,
+        controller_configs: list[str],
+        account_name: str | None = "master_account",
+        max_global_drawdown_quote: float | None = None,
+        max_controller_drawdown_quote: float | None = None,
+        image: str = "hummingbot/hummingbot:latest",
 ) -> str:
     """Deploy a bot with specified controller configurations.
     Args:
@@ -509,7 +520,9 @@ async def deploy_bot_with_controllers(
         return f"Bot Deployment Result: {result}"
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
 
 @mcp.tool()
 async def get_active_bots_status():
@@ -522,7 +535,37 @@ async def get_active_bots_status():
         return f"Active Bots Status: {active_bots}"
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+
+@mcp.tool()
+async def stop_bot_or_controller_execution(
+        bot_name: str,
+        controller_names: Optional[list[str]] = None,
+):
+    """
+    Stop and archive a bot forever or stop the execution of a controller of a runnning bot. If the controllers to stop
+    are not specified, it will stop the bot execution and archive it forever, if they are specified, will only stop
+    the execution of those controllers and the bot will still be running with the rest of the controllers.
+    Args:
+        bot_name: Name of the bot to stop
+        controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if controller_names is None or len(controller_names) == 0:
+            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
+            return f"Bot execution stopped and archived: {result}"
+        else:
+            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
+                     for controller in controller_names]
+            result = await asyncio.gather(*tasks)
+            return f"Controller execution stopped: {result}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 
 async def main():
