@@ -394,7 +394,7 @@ async def get_order_book(
 
 @mcp.tool()
 async def explore_controllers(
-        action: Literal["list", "describe"] | None = None,
+        action: Literal["list", "describe"],
         controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
         controller_name: str | None = None,
         config_name: str | None = None,
@@ -405,92 +405,58 @@ async def explore_controllers(
     Use this tool to discover what's available and understand how things work.
     
     Progressive flow:
-    1. No params → List all controllers grouped by type + their associated configs
+    1. action="list" → List all controllers and their configs
     2. action="list" + controller_type → List controllers of that type with config counts
     3. action="describe" + controller_name → Show controller code + list its configs + explain parameters
     4. action="describe" + config_name → Show specific config details + which controller it uses
-    
-    Examples:
-    - explore_controllers() → See everything available
-    - explore_controllers(action="describe", controller_name="PMM_Simple") → Understand PMM_Simple
-    - explore_controllers(action="describe", config_name="pmm_btc_maker") → See config details
+
+    Args:
+        action: "list" to list controllers or "describe" to show details of a specific controller or config.
+        controller_type: Type of controller to filter by (optional, e.g., 'directional_trading', 'market_making', 'generic').
+        controller_name: Name of the controller to describe (optional, only required for describe specific controller).
+        config_name: Name of the config to describe (optional, only required for describe specific config).
     """
     try:
         client = await hummingbot_client.get_client()
-        
-        if action is None:
-            # List all controllers and their configs
-            controllers = await client.controllers.list_controllers()
-            configs = await client.controllers.list_controller_configs()
-            
-            result = "Available Controllers and Configs:\n\n"
-            for type_name in ["directional_trading", "market_making", "generic"]:
-                result += f"## {type_name.replace('_', ' ').title()}:\n"
-                type_controllers = controllers.get(type_name, [])
-                if type_controllers:
-                    for controller in type_controllers:
-                        # Find configs using this controller
-                        controller_configs = [c for c in configs if c.get('controller_name') == controller]
-                        result += f"  - {controller} ({len(controller_configs)} configs)\n"
-                        if controller_configs:
-                            for config in controller_configs:
-                                result += f"    • {config.get('id', 'unknown')}\n"
-                else:
-                    result += "  No controllers available\n"
-                result += "\n"
-            return result
-            
-        elif action == "list":
-            if controller_type:
-                controllers = await client.controllers.list_controllers()
-                type_controllers = controllers.get(controller_type, [])
-                configs = await client.controllers.list_controller_configs()
-                
-                result = f"Controllers of type '{controller_type}':\n\n"
-                for controller in type_controllers:
+        # List all controllers and their configs
+        controllers = await client.controllers.list_controllers()
+        configs = await client.controllers.list_controller_configs()
+        result = ""
+        if action == "list":
+            result = "Available Controllers:\n\n"
+            for c_type, controllers in controllers.items():
+                if controller_type is not None and c_type != controller_type:
+                    continue
+                result += f"Controller Type: {c_type}\n"
+                for controller in controllers:
                     controller_configs = [c for c in configs if c.get('controller_name') == controller]
                     result += f"- {controller} ({len(controller_configs)} configs)\n"
-                return result
-            else:
-                # Same as no params
-                return await explore_controllers()
-                
+                    if len(controller_configs) > 0:
+                        result += "  Configs:\n"
+                        for config in controller_configs:
+                            result += f"    - {config.get('id', 'unknown')}\n"
+            return result
         elif action == "describe":
-            if controller_name:
-                # Show controller code and its configs
+            config = await client.controllers.get_controller_config(config_name) if config_name else None
+            if controller_name or config:
+                if controller_name != config.get("controller_name"):
+                    controller_name = config.get("controller_name")
+                    result += f"Controller name not matching, using config's controller name: {controller_name}\n"
+
                 # First, determine the controller type
-                controllers = await client.controllers.list_controllers()
-                controller_type_found = None
-                for ctype, clist in controllers.items():
-                    if controller_name in clist:
-                        controller_type_found = ctype
+                controller_type = None
+                for c_type, controllers in controllers.items():
+                    if controller_name in controllers:
+                        controller_type = c_type
                         break
-                
-                if not controller_type_found:
+                if not controller_type:
                     return f"Controller '{controller_name}' not found."
-                
-                code = await client.controllers.get_controller(controller_type_found, controller_name)
-                configs = await client.controllers.list_controller_configs()
-                controller_configs = [c for c in configs if c.get('controller_name') == controller_name]
-                
-                result = f"Controller: {controller_name}\n"
-                result += f"Type: {controller_type_found}\n\n"
-                result += "=== Controller Code ===\n"
-                result += code + "\n\n"
-                result += "=== Configs Using This Controller ===\n"
-                if controller_configs:
-                    for config in controller_configs:
-                        result += f"- {config.get('id', 'unknown')}\n"
-                else:
-                    result += "No configs found for this controller\n"
-                return result
-                
-            elif config_name:
-                # Show config details
-                config = await client.controllers.get_controller_config(config_name)
-                return f"Config Details:\n{config}"
-            else:
-                return "Please specify either controller_name or config_name with action='describe'"
+                # Get controller code and configs
+                controller_code = await client.controllers.get_controller(controller_type, controller_name)
+                controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
+                result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
+                result += f"All configs available for controller:\n {controller_configs}"
+            return result
         else:
             return "Invalid action. Use 'list' or 'describe', or omit for overview."
             
