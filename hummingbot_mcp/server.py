@@ -478,15 +478,18 @@ async def modify_controllers(
         # For configs
         config_name: str | None = None,
         config_data: dict[str, Any] | None = None,
+        # For configs in bots
+        bot_name: str | None = None,
         # Safety
         confirm_override: bool = False,
 ) -> str:
     """
-    Create, update, or delete controllers and their configurations.
+    Create, update, or delete controllers and their configurations. If bot name is provided, it can only modify the config
+    in the bot deployed with that name.
     
-    Controllers = Strategy templates (Python code)
-    Configs = Strategy instances (parameter sets using a controller)
-    
+    Controllers = are essentially strategies that can be run in Hummingbot.
+    Configs = are the parameters that the controller uses to run.
+
     Args:
         action: "upsert" (create/update) or "delete"
         target: "controller" (template) or "config" (instance)
@@ -495,6 +498,7 @@ async def modify_controllers(
     Examples:
     - Create new controller: modify_controllers("upsert", "controller", controller_type="market_making", ...)
     - Create config: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...})
+    - Modify config from bot: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...}, bot_name="my_bot")
     - Delete config: modify_controllers("delete", "config", config_name="old_strategy")
     """
     try:
@@ -510,7 +514,9 @@ async def modify_controllers(
                 exists = controller_name in controllers.get(controller_type, [])
                 
                 if exists and not confirm_override:
-                    return f"Controller '{controller_name}' already exists. Set confirm_override=True to update it."
+                    controller_code = await client.controllers.get_controller(controller_type, controller_name)
+                    return (f"Controller '{controller_name}' already exists and this is the current code: {controller_code}. "
+                            f"Set confirm_override=True to update it.")
                 
                 result = await client.controllers.create_or_update_controller(
                     controller_type, controller_name, controller_code
@@ -528,23 +534,38 @@ async def modify_controllers(
             if action == "upsert":
                 if not config_name or not config_data:
                     raise ValueError("config_name and config_data are required for config upsert")
-                
-                # Ensure config_data has the correct id
-                if "id" not in config_data or config_data["id"] != config_name:
-                    config_data["id"] = config_name
-                
-                # Check if config exists
-                try:
-                    existing = await client.controllers.get_controller_config(config_name)
-                    exists = True
-                except:
-                    exists = False
-                
-                if exists and not confirm_override:
-                    return f"Config '{config_name}' already exists. Set confirm_override=True to update it."
-                
-                result = await client.controllers.create_or_update_controller_config(config_name, config_data)
-                return f"Config {'updated' if exists else 'created'}: {result}"
+
+                if bot_name:
+                    if not confirm_override:
+                        current_configs = await client.controllers.get_bot_controller_configs(bot_name)
+                        config = next((c for c in current_configs if c.get("id") == config_name), None)
+                        if config:
+                            return (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
+                                    "Set confirm_override=True to update it.")
+                        else:
+                            update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                            return f"Config created in bot '{bot_name}': {update_op}"
+                    else:
+                        # Ensure config_data has the correct id
+                        if "id" not in config_data or config_data["id"] != config_name:
+                            config_data["id"] = config_name
+                        update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                        return f"Config updated in bot '{bot_name}': {update_op}"
+                else:
+                    # Ensure config_data has the correct id
+                    if "id" not in config_data or config_data["id"] != config_name:
+                        config_data["id"] = config_name
+
+                    controller_configs = await client.controllers.list_controller_configs()
+                    exists = config_name in controller_configs
+
+                    if exists and not confirm_override:
+                        existing_config = await client.controllers.get_controller_config(config_name)
+                        return (f"Config '{config_name}' already exists with data: {existing_config}."
+                                "Set confirm_override=True to update it.")
+
+                    result = await client.controllers.create_or_update_controller_config(config_name, config_data)
+                    return f"Config {'updated' if exists else 'created'}: {result}"
                 
             elif action == "delete":
                 if not config_name:
