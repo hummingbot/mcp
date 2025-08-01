@@ -393,50 +393,107 @@ async def get_order_book(
 
 
 @mcp.tool()
-async def manage_controller_configs(
-        action: Literal["list", "get", "upsert", "delete"],
+async def explore_controllers(
+        action: Literal["list", "describe"] | None = None,
+        controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
+        controller_name: str | None = None,
         config_name: str | None = None,
-        config_data: dict[str, Any] | None = None,
 ) -> str:
     """
-    Manage controller configurations for Hummingbot MCP. If action is
-    - 'list': will return all controller configs.
-    - 'get': will return the config for the given config_name.
-    - 'upsert': will create a controller config (if it doesn't exist) or update the config for the given config_name
-    with the provided config_data, is important to know that the config_name should be the same as the value of 'id'
-    in the config data. In order to create a config properly you can use the 'get' action to get the controller code
-    and understand how to configure it.
-    - 'delete': will delete the config for the given config_name.
-    Args:
-        action: Action to perform ('list', 'get', 'upsert', 'delete')
-        config_name: Name of the controller config to manage (required for 'get', 'upsert', 'delete')
-        config_data: Data for the controller config (required for 'upsert')
+    Explore and understand controllers and their configs.
+    
+    Use this tool to discover what's available and understand how things work.
+    
+    Progressive flow:
+    1. No params → List all controllers grouped by type + their associated configs
+    2. action="list" + controller_type → List controllers of that type with config counts
+    3. action="describe" + controller_name → Show controller code + list its configs + explain parameters
+    4. action="describe" + config_name → Show specific config details + which controller it uses
+    
+    Examples:
+    - explore_controllers() → See everything available
+    - explore_controllers(action="describe", controller_name="PMM_Simple") → Understand PMM_Simple
+    - explore_controllers(action="describe", config_name="pmm_btc_maker") → See config details
     """
     try:
         client = await hummingbot_client.get_client()
-        if action == "list":
+        
+        if action is None:
+            # List all controllers and their configs
+            controllers = await client.controllers.list_controllers()
             configs = await client.controllers.list_controller_configs()
-            return f"Controller Configs: {configs}"
-        elif action == "get":
-            if not config_name:
-                raise ValueError("config_name is required for 'get' action")
-            config = await client.controllers.get_controller_config(config_name)
-            return f"Controller Config: {config}"
-        elif action == "upsert":
-            if not config_name or not config_data:
-                raise ValueError("config_name and config_data are required for 'upsert' action")
-            if "id" not in config_data or config_data["id"] != config_name:
-                config_data["id"] = config_name
-            result = await client.controllers.create_or_update_controller_config(config_name, config_data)
-            return f"Controller Config Upserted: {result}"
-        elif action == "delete":
-            if not config_name:
-                raise ValueError("config_name is required for 'delete' action")
-            result = await client.controllers.delete_controller_config(config_name)
-            await client.bot_orchestration.deploy_v2_controllers()
-            return f"Controller Config Deleted: {result}"
+            
+            result = "Available Controllers and Configs:\n\n"
+            for type_name in ["directional_trading", "market_making", "generic"]:
+                result += f"## {type_name.replace('_', ' ').title()}:\n"
+                type_controllers = controllers.get(type_name, [])
+                if type_controllers:
+                    for controller in type_controllers:
+                        # Find configs using this controller
+                        controller_configs = [c for c in configs if c.get('controller_name') == controller]
+                        result += f"  - {controller} ({len(controller_configs)} configs)\n"
+                        if controller_configs:
+                            for config in controller_configs:
+                                result += f"    • {config.get('id', 'unknown')}\n"
+                else:
+                    result += "  No controllers available\n"
+                result += "\n"
+            return result
+            
+        elif action == "list":
+            if controller_type:
+                controllers = await client.controllers.list_controllers()
+                type_controllers = controllers.get(controller_type, [])
+                configs = await client.controllers.list_controller_configs()
+                
+                result = f"Controllers of type '{controller_type}':\n\n"
+                for controller in type_controllers:
+                    controller_configs = [c for c in configs if c.get('controller_name') == controller]
+                    result += f"- {controller} ({len(controller_configs)} configs)\n"
+                return result
+            else:
+                # Same as no params
+                return await explore_controllers()
+                
+        elif action == "describe":
+            if controller_name:
+                # Show controller code and its configs
+                # First, determine the controller type
+                controllers = await client.controllers.list_controllers()
+                controller_type_found = None
+                for ctype, clist in controllers.items():
+                    if controller_name in clist:
+                        controller_type_found = ctype
+                        break
+                
+                if not controller_type_found:
+                    return f"Controller '{controller_name}' not found."
+                
+                code = await client.controllers.get_controller(controller_type_found, controller_name)
+                configs = await client.controllers.list_controller_configs()
+                controller_configs = [c for c in configs if c.get('controller_name') == controller_name]
+                
+                result = f"Controller: {controller_name}\n"
+                result += f"Type: {controller_type_found}\n\n"
+                result += "=== Controller Code ===\n"
+                result += code + "\n\n"
+                result += "=== Configs Using This Controller ===\n"
+                if controller_configs:
+                    for config in controller_configs:
+                        result += f"- {config.get('id', 'unknown')}\n"
+                else:
+                    result += "No configs found for this controller\n"
+                return result
+                
+            elif config_name:
+                # Show config details
+                config = await client.controllers.get_controller_config(config_name)
+                return f"Config Details:\n{config}"
+            else:
+                return "Please specify either controller_name or config_name with action='describe'"
         else:
-            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+            return "Invalid action. Use 'list' or 'describe', or omit for overview."
+            
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -444,44 +501,94 @@ async def manage_controller_configs(
 
 
 @mcp.tool()
-async def manage_controllers(
-        action: Literal["list", "get", "upsert", "delete"],
-        controller_type: Optional[Literal["directional_trading", "market_making", "generic"]] = None,
-        controller_name: Optional[str] = None,
-        controller_code: Optional[str] = None,
+async def modify_controllers(
+        action: Literal["upsert", "delete"],
+        target: Literal["controller", "config"],
+        # For controllers
+        controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
+        controller_name: str | None = None,
+        controller_code: str | None = None,
+        # For configs
+        config_name: str | None = None,
+        config_data: dict[str, Any] | None = None,
+        # Safety
+        confirm_override: bool = False,
 ) -> str:
     """
-    Manage controller files (controllers are substrategies).
-    If action is:
-    - 'list': will show all the controllers available by type.
-    - 'get': will get the code of the controller, this will be really useful when trying to create a controller.
-    configuration since you can understand how each parameter is used.
-    - 'upsert': you can modify the code of a controller or add it if it doesn't exist.
-    - 'delete': delete a controller
-
+    Create, update, or delete controllers and their configurations.
+    
+    Controllers = Strategy templates (Python code)
+    Configs = Strategy instances (parameter sets using a controller)
+    
     Args:
-        action: Action to perform ('list', 'get', 'upsert', 'delete')
-        controller_type: ("directional_trading", "market_making", "generic") is required for the actions 'get', 'upsert' and 'delete'.
-        controller_name: Name of the controller to manage (required for 'get', 'upsert', 'delete')
-        controller_code: Code to update, only required for the action 'upsert'.
+        action: "upsert" (create/update) or "delete"
+        target: "controller" (template) or "config" (instance)
+        confirm_override: Required True if overwriting existing
+        
+    Examples:
+    - Create new controller: modify_controllers("upsert", "controller", controller_type="market_making", ...)
+    - Create config: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...})
+    - Delete config: modify_controllers("delete", "config", config_name="old_strategy")
     """
     try:
         client = await hummingbot_client.get_client()
-        if action == "list":
-            result = await client.controllers.list_controllers()
-            return f"Available controllers: {result}"
-        elif action == "get":
-            result = await client.controllers.get_controller(controller_type, controller_name)
-            return f"Controller code: {result}"
-        elif action == "upsert":
-            result = await client.controllers.create_or_update_controller(controller_type, controller_name,
-                                                                          controller_code)
-            return f"Upsert operation: {result}"
-        elif action == "delete":
-            result = await client.controllers.delete_controller(controller_type, controller_name)
-            return f"Delete operation: {result}"
+        
+        if target == "controller":
+            if action == "upsert":
+                if not controller_type or not controller_name or not controller_code:
+                    raise ValueError("controller_type, controller_name, and controller_code are required for controller upsert")
+                
+                # Check if controller exists
+                controllers = await client.controllers.list_controllers()
+                exists = controller_name in controllers.get(controller_type, [])
+                
+                if exists and not confirm_override:
+                    return f"Controller '{controller_name}' already exists. Set confirm_override=True to update it."
+                
+                result = await client.controllers.create_or_update_controller(
+                    controller_type, controller_name, controller_code
+                )
+                return f"Controller {'updated' if exists else 'created'}: {result}"
+                
+            elif action == "delete":
+                if not controller_type or not controller_name:
+                    raise ValueError("controller_type and controller_name are required for controller delete")
+                    
+                result = await client.controllers.delete_controller(controller_type, controller_name)
+                return f"Controller deleted: {result}"
+                
+        elif target == "config":
+            if action == "upsert":
+                if not config_name or not config_data:
+                    raise ValueError("config_name and config_data are required for config upsert")
+                
+                # Ensure config_data has the correct id
+                if "id" not in config_data or config_data["id"] != config_name:
+                    config_data["id"] = config_name
+                
+                # Check if config exists
+                try:
+                    existing = await client.controllers.get_controller_config(config_name)
+                    exists = True
+                except:
+                    exists = False
+                
+                if exists and not confirm_override:
+                    return f"Config '{config_name}' already exists. Set confirm_override=True to update it."
+                
+                result = await client.controllers.create_or_update_controller_config(config_name, config_data)
+                return f"Config {'updated' if exists else 'created'}: {result}"
+                
+            elif action == "delete":
+                if not config_name:
+                    raise ValueError("config_name is required for config delete")
+                    
+                result = await client.controllers.delete_controller_config(config_name)
+                await client.bot_orchestration.deploy_v2_controllers()
+                return f"Config deleted: {result}"
         else:
-            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+            raise ValueError("Invalid target. Must be 'controller' or 'config'.")
+            
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -540,7 +647,7 @@ async def get_active_bots_status():
 
 
 @mcp.tool()
-async def stop_bot_or_controller_execution(
+async def stop_bot_or_controllers(
         bot_name: str,
         controller_names: Optional[list[str]] = None,
 ):
