@@ -1,7 +1,7 @@
 """
 Account management tools for Hummingbot MCP Server
 """
-
+import asyncio
 import logging
 from typing import Any
 
@@ -166,12 +166,19 @@ async def setup_connector(request: SetupConnectorRequest) -> dict[str, Any]:
                     connector_names.append(c.name)
                 else:
                     connector_names.append(str(c))
+            current_accounts_str = "Current accounts: "
+            accounts = await client.accounts.list_accounts()
+            credentials_tasks = [client.accounts.list_account_credentials(account_name=account_name) for account_name in accounts]
+            credentials = await asyncio.gather(*credentials_tasks)
+            for account, creds in zip(accounts, credentials):
+                current_accounts_str += f"{account}: {creds}), "
 
             return {
                 "action": "list_connectors",
                 "message": "Available exchange connectors:",
                 "connectors": connector_names,
                 "total_connectors": len(connector_names),
+                "current_accounts": current_accounts_str.strip(", "),
                 "next_step": "Call again with 'connector' parameter to see required credentials for a specific exchange",
                 "example": "Use connector='binance' to see Binance setup requirements",
             }

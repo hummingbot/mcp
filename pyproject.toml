@@ -4,11 +4,10 @@ version = "0.1.0"
 description = "MCP server for Hummingbot API integration - manage crypto trading across multiple exchanges"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,6 +31,9 @@ mcp-hummingbot = "hummingbot_mcp:main"
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["hummingbot_mcp"]
 
 [tool.ruff]
 line-length = 140
