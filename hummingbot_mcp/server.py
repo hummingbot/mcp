@@ -432,30 +432,31 @@ async def explore_controllers(
                     controller_configs = [c for c in configs if c.get('controller_name') == controller]
                     result += f"- {controller} ({len(controller_configs)} configs)\n"
                     if len(controller_configs) > 0:
-                        result += "  Configs:\n"
                         for config in controller_configs:
                             result += f"    - {config.get('id', 'unknown')}\n"
             return result
         elif action == "describe":
             config = await client.controllers.get_controller_config(config_name) if config_name else None
-            if controller_name or config:
+            if config:
                 if controller_name != config.get("controller_name"):
                     controller_name = config.get("controller_name")
                     result += f"Controller name not matching, using config's controller name: {controller_name}\n"
-
-                # First, determine the controller type
-                controller_type = None
-                for c_type, controllers in controllers.items():
-                    if controller_name in controllers:
-                        controller_type = c_type
-                        break
-                if not controller_type:
-                    return f"Controller '{controller_name}' not found."
-                # Get controller code and configs
-                controller_code = await client.controllers.get_controller(controller_type, controller_name)
-                controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
-                result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
-                result += f"All configs available for controller:\n {controller_configs}"
+                result += f"Config Details for {config_name}:\n{config}\n\n"
+            if not controller_name:
+                return "Please provide a controller name to describe."
+            # First, determine the controller type
+            controller_type = None
+            for c_type, controllers in controllers.items():
+                if controller_name in controllers:
+                    controller_type = c_type
+                    break
+            if not controller_type:
+                return f"Controller '{controller_name}' not found."
+            # Get controller code and configs
+            controller_code = await client.controllers.get_controller(controller_type, controller_name)
+            controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
+            result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
+            result += f"All configs available for controller:\n {controller_configs}"
             return result
         else:
             return "Invalid action. Use 'list' or 'describe', or omit for overview."
