@@ -456,7 +456,9 @@ async def explore_controllers(
             controller_code = await client.controllers.get_controller(controller_type, controller_name)
             controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
             result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
+            template = await client.controllers.get_controller_config_template(controller_type, controller_name)
             result += f"All configs available for controller:\n {controller_configs}"
+            result += f"\n\nController Config Template:\n{template}\n\n"
             return result
         else:
             return "Invalid action. Use 'list' or 'describe', or omit for overview."
@@ -535,6 +537,9 @@ async def modify_controllers(
                 if not config_name or not config_data:
                     raise ValueError("config_name and config_data are required for config upsert")
 
+                # validate config first
+                await client.controllers.validate_controller_config(controller_type, controller_name, config_name)
+
                 if bot_name:
                     if not confirm_override:
                         current_configs = await client.controllers.get_bot_controller_configs(bot_name)
@@ -581,6 +586,9 @@ async def modify_controllers(
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
             "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    except Exception as e:
+        logger.error(f"Failed request to Hummingbot API: {e}")
+        raise ToolError(f"Failed to modify controllers/configs: {str(e)}")
 
 
 @mcp.tool()
