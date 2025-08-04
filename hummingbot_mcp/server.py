@@ -586,7 +586,7 @@ async def modify_controllers(
 @mcp.tool()
 async def deploy_bot_with_controllers(
         bot_name: str,
-        controller_configs: list[str],
+        controllers_config: list[str],
         account_name: str | None = "master_account",
         max_global_drawdown_quote: float | None = None,
         max_controller_drawdown_quote: float | None = None,
@@ -595,7 +595,7 @@ async def deploy_bot_with_controllers(
     """Deploy a bot with specified controller configurations.
     Args:
         bot_name: Name of the bot to deploy
-        controller_configs: List of controller configs to use for the bot deployment.
+        controllers_config: List of controller configs to use for the bot deployment.
         account_name: Account name to use for the bot (default: master_account)
         max_global_drawdown_quote: Maximum global drawdown in quote currency (optional) defaults to None.
         max_controller_drawdown_quote: Maximum drawdown per controller in quote currency (optional) defaults to None.
@@ -606,7 +606,7 @@ async def deploy_bot_with_controllers(
         # Validate controller configs
         result = await client.bot_orchestration.deploy_v2_controllers(
             instance_name=bot_name,
-            controller_configs=controller_configs,
+            controllers_config=controllers_config,
             credentials_profile=account_name,
             max_global_drawdown_quote=max_global_drawdown_quote,
             max_controller_drawdown_quote=max_controller_drawdown_quote,
