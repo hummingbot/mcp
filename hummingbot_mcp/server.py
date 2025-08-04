@@ -410,6 +410,26 @@ async def explore_controllers(
     3. action="describe" + controller_name → Show controller code + list its configs + explain parameters
     4. action="describe" + config_name → Show specific config details + which controller it uses
 
+    Common Enum Values for Controller Configs:
+    
+    Position Mode (position_mode):
+    - "HEDGE" - Allows holding both long and short positions simultaneously
+    - "ONEWAY" - Allows only one direction position at a time
+    - Note: Use as string value, e.g., position_mode: "HEDGE"
+    
+    Trade Side (side):
+    - 1 or "BUY" - For long/buy positions
+    - 2 or "SELL" - For short/sell positions  
+    - 3 - Other trade types
+    - Note: Numeric values are required for controller configs
+    
+    Order Type (order_type, open_order_type, take_profit_order_type, etc.):
+    - 1 or "MARKET" - Market order
+    - 2 or "LIMIT" - Limit order
+    - 3 or "LIMIT_MAKER" - Limit maker order (post-only)
+    - 4 - Other order types
+    - Note: Numeric values are required for controller configs
+
     Args:
         action: "list" to list controllers or "describe" to show details of a specific controller or config.
         controller_type: Type of controller to filter by (optional, e.g., 'directional_trading', 'market_making', 'generic').
@@ -489,6 +509,10 @@ async def modify_controllers(
     Create, update, or delete controllers and their configurations. If bot name is provided, it can only modify the config
     in the bot deployed with that name.
     
+    IMPORTANT: When creating a config without specifying config_data details, you MUST first use the explore_controllers tool
+    with action="describe" and the controller_name to understand what parameters are required. The config_data must include
+    ALL relevant parameters for the controller to function properly.
+    
     Controllers = are essentially strategies that can be run in Hummingbot.
     Configs = are the parameters that the controller uses to run.
 
@@ -496,6 +520,12 @@ async def modify_controllers(
         action: "upsert" (create/update) or "delete"
         target: "controller" (template) or "config" (instance)
         confirm_override: Required True if overwriting existing
+        config_data: For config creation, MUST contain all required controller parameters. Use explore_controllers first!
+        
+    Workflow for creating a config:
+    1. Use explore_controllers(action="describe", controller_name="<name>") to see required parameters
+    2. Create config_data dict with ALL required parameters from the controller template
+    3. Call modify_controllers with the complete config_data
         
     Examples:
     - Create new controller: modify_controllers("upsert", "controller", controller_type="market_making", ...)
@@ -537,8 +567,15 @@ async def modify_controllers(
                 if not config_name or not config_data:
                     raise ValueError("config_name and config_data are required for config upsert")
 
+                # Extract controller_type and controller_name from config_data
+                config_controller_type = config_data.get("controller_type")
+                config_controller_name = config_data.get("controller_name")
+                
+                if not config_controller_type or not config_controller_name:
+                    raise ValueError("config_data must include 'controller_type' and 'controller_name'")
+
                 # validate config first
-                await client.controllers.validate_controller_config(controller_type, controller_name, config_name)
+                await client.controllers.validate_controller_config(config_controller_type, config_controller_name, config_data)
 
                 if bot_name:
                     if not confirm_override:
