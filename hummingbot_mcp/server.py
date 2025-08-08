@@ -31,10 +31,10 @@ mcp = FastMCP("hummingbot-mcp")
 
 @mcp.tool()
 async def setup_connector(
-    connector: str | None = None,
-    credentials: dict[str, Any] | None = None,
-    account: str | None = None,
-    confirm_override: bool | None = None,
+        connector: str | None = None,
+        credentials: dict[str, Any] | None = None,
+        account: str | None = None,
+        confirm_override: bool | None = None,
 ) -> str:
     """Setup a new exchange connector for an account with credentials using progressive disclosure.
 
@@ -64,9 +64,10 @@ async def setup_connector(
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
 
+
 @mcp.tool()
 async def get_portfolio_balances(
-    account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
+        account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
 ) -> str:
     """Get portfolio balances and holdings across all connected exchanges.
 
@@ -87,7 +88,8 @@ async def get_portfolio_balances(
         client = await hummingbot_client.get_client()
         if as_distribution:
             # Get portfolio distribution
-            result = await client.portfolio.get_distribution(account_names=account_names, connector_names=connector_names)
+            result = await client.portfolio.get_distribution(account_names=account_names,
+                                                             connector_names=connector_names)
             return f"Portfolio Distribution: {result}"
         account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
         return f"Account State: {account_info}"
@@ -101,14 +103,14 @@ async def get_portfolio_balances(
 
 @mcp.tool()
 async def place_order(
-    connector_name: str,
-    trading_pair: str,
-    trade_type: str,
-    amount: str,
-    price: str | None = None,
-    order_type: str = "MARKET",
-    position_action: str | None = "OPEN",
-    account_name: str | None = "master_account",
+        connector_name: str,
+        trading_pair: str,
+        trade_type: str,
+        amount: str,
+        price: str | None = None,
+        order_type: str = "MARKET",
+        position_action: str | None = "OPEN",
+        account_name: str | None = "master_account",
 ) -> str:
     """Place a buy or sell order (supports USD values by adding at the start of the amount $).
 
@@ -149,11 +151,11 @@ async def place_order(
 
 @mcp.tool()
 async def set_account_position_mode_and_leverage(
-    account_name: str,
-    connector_name: str,
-    trading_pair: str | None = None,
-    position_mode: str | None = None,
-    leverage: int | None = None,
+        account_name: str,
+        connector_name: str,
+        trading_pair: str | None = None,
+        position_mode: str | None = None,
+        leverage: int | None = None,
 ) -> str:
     """Set position mode and leverage for an account on a specific exchange. If position mode is not specified, will only
     set the leverage. If leverage is not specified, will only set the position mode.
@@ -196,14 +198,14 @@ async def set_account_position_mode_and_leverage(
 
 @mcp.tool()
 async def get_orders(
-    account_names: list[str] | None = None,
-    connector_names: list[str] | None = None,
-    trading_pairs: list[str] | None = None,
-    status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
-    start_time: int | None = None,
-    end_time: int | None = None,
-    limit: int | None = 500,
-    cursor: str | None = None,
+        account_names: list[str] | None = None,
+        connector_names: list[str] | None = None,
+        trading_pairs: list[str] | None = None,
+        status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int | None = 500,
+        cursor: str | None = None,
 ) -> str:
     """Get the orders manged by the connected accounts.
 
@@ -238,7 +240,7 @@ async def get_orders(
 
 @mcp.tool()
 async def get_positions(
-    account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
+        account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
 ) -> str:
     """Get the positions managed by the connected accounts.
 
@@ -249,7 +251,8 @@ async def get_positions(
     """
     try:
         client = await hummingbot_client.get_client()
-        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names, limit=limit)
+        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
+                                                    limit=limit)
         return f"Position Management Result: {result}"
     except Exception as e:
         logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
@@ -301,7 +304,8 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
         elif interval.endswith("w"):
             max_records = 7 * days
         else:
-            raise ValueError(f"Unsupported interval format: {interval}. Use '1m', '5m', '15m', '30m', '1h', '4h', '1d', or '1w'.")
+            raise ValueError(
+                f"Unsupported interval format: {interval}. Use '1m', '5m', '15m', '30m', '1h', '4h', '1d', or '1w'.")
         max_records = int(max_records / int(interval[:-1])) if interval[:-1] else max_records
 
         candles = await client.market_data.get_candles(
@@ -328,7 +332,8 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
                 f"Connector '{connector_name}' is not a perpetual connector. Funding rates are only available for"
                 f"perpetual connectors."
             )
-        funding_rate = await client.market_data.get_funding_info(connector_name=connector_name, trading_pair=trading_pair)
+        funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
+                                                                 trading_pair=trading_pair)
         return f"Funding Rate: {funding_rate}"
     except Exception as e:
         logger.error(f"get_funding_rate failed: {str(e)}", exc_info=True)
@@ -337,11 +342,12 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
 
 @mcp.tool()
 async def get_order_book(
-    connector_name: str,
-    trading_pair: str,
-    query_type: Literal["snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
-    query_value: float | None = None,
-    is_buy: bool = True,
+        connector_name: str,
+        trading_pair: str,
+        query_type: Literal[
+            "snapshot", "volume_for_price", "price_for_volume", "quote_volume_for_price", "price_for_quote_volume"],
+        query_value: float | None = None,
+        is_buy: bool = True,
 ) -> str:
     """Get order book data for a trading pair on a specific exchange connector, if the query type is different than
     snapshot, you need to provide query_value and is_buy
@@ -356,7 +362,8 @@ async def get_order_book(
     try:
         client = await hummingbot_client.get_client()
         if query_type == "snapshot":
-            order_book = await client.market_data.get_order_book(connector_name=connector_name, trading_pair=trading_pair)
+            order_book = await client.market_data.get_order_book(connector_name=connector_name,
+                                                                 trading_pair=trading_pair)
             return f"Order Book Snapshot: {order_book}"
         else:
             if query_value is None:
@@ -386,110 +393,254 @@ async def get_order_book(
 
 
 @mcp.tool()
-async def manage_controller_configs(
-    action: Literal["list", "get", "upsert", "delete"],
-    config_name: str | None = None,
-    config_data: dict[str, Any] | None = None,
+async def explore_controllers(
+        action: Literal["list", "describe"],
+        controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
+        controller_name: str | None = None,
+        config_name: str | None = None,
 ) -> str:
     """
-    Manage controller configurations for Hummingbot MCP. If action is
-    - 'list': will return all controller configs.
-    - 'get': will return the config for the given config_name.
-    - 'upsert': will create a controller config (if it doesn't exist) or update the config for the given config_name
-    with the provided config_data, is important to know that the config_name should be the same as the value of 'id'
-    in the config data. In order to create a config properly you can use the 'get' action to get the controller code
-    and understand how to configure it.
-    - 'delete': will delete the config for the given config_name.
+    Explore and understand controllers and their configs.
+    
+    Use this tool to discover what's available and understand how things work.
+    
+    Progressive flow:
+    1. action="list" → List all controllers and their configs
+    2. action="list" + controller_type → List controllers of that type with config counts
+    3. action="describe" + controller_name → Show controller code + list its configs + explain parameters
+    4. action="describe" + config_name → Show specific config details + which controller it uses
+
+    Common Enum Values for Controller Configs:
+    
+    Position Mode (position_mode):
+    - "HEDGE" - Allows holding both long and short positions simultaneously
+    - "ONEWAY" - Allows only one direction position at a time
+    - Note: Use as string value, e.g., position_mode: "HEDGE"
+    
+    Trade Side (side):
+    - 1 or "BUY" - For long/buy positions
+    - 2 or "SELL" - For short/sell positions  
+    - 3 - Other trade types
+    - Note: Numeric values are required for controller configs
+    
+    Order Type (order_type, open_order_type, take_profit_order_type, etc.):
+    - 1 or "MARKET" - Market order
+    - 2 or "LIMIT" - Limit order
+    - 3 or "LIMIT_MAKER" - Limit maker order (post-only)
+    - 4 - Other order types
+    - Note: Numeric values are required for controller configs
+
     Args:
-        action: Action to perform ('list', 'get', 'upsert', 'delete')
-        config_name: Name of the controller config to manage (required for 'get', 'upsert', 'delete')
-        config_data: Data for the controller config (required for 'upsert')
+        action: "list" to list controllers or "describe" to show details of a specific controller or config.
+        controller_type: Type of controller to filter by (optional, e.g., 'directional_trading', 'market_making', 'generic').
+        controller_name: Name of the controller to describe (optional, only required for describe specific controller).
+        config_name: Name of the config to describe (optional, only required for describe specific config).
     """
     try:
         client = await hummingbot_client.get_client()
+        # List all controllers and their configs
+        controllers = await client.controllers.list_controllers()
+        configs = await client.controllers.list_controller_configs()
+        result = ""
         if action == "list":
-            configs = await client.controllers.list_controller_configs()
-            return f"Controller Configs: {configs}"
-        elif action == "get":
-            if not config_name:
-                raise ValueError("config_name is required for 'get' action")
-            config = await client.controllers.get_controller_config(config_name)
-            return f"Controller Config: {config}"
-        elif action == "upsert":
-            if not config_name or not config_data:
-                raise ValueError("config_name and config_data are required for 'upsert' action")
-            if "id" not in config_data or config_data["id"] != config_name:
-                config_data["id"] = config_name
-            result = await client.controllers.create_or_update_controller_config(config_name, config_data)
-            return f"Controller Config Upserted: {result}"
-        elif action == "delete":
-            if not config_name:
-                raise ValueError("config_name is required for 'delete' action")
-            result = await client.controllers.delete_controller_config(config_name)
-            await client.bot_orchestration.deploy_v2_controllers()
-            return f"Controller Config Deleted: {result}"
+            result = "Available Controllers:\n\n"
+            for c_type, controllers in controllers.items():
+                if controller_type is not None and c_type != controller_type:
+                    continue
+                result += f"Controller Type: {c_type}\n"
+                for controller in controllers:
+                    controller_configs = [c for c in configs if c.get('controller_name') == controller]
+                    result += f"- {controller} ({len(controller_configs)} configs)\n"
+                    if len(controller_configs) > 0:
+                        for config in controller_configs:
+                            result += f"    - {config.get('id', 'unknown')}\n"
+            return result
+        elif action == "describe":
+            config = await client.controllers.get_controller_config(config_name) if config_name else None
+            if config:
+                if controller_name != config.get("controller_name"):
+                    controller_name = config.get("controller_name")
+                    result += f"Controller name not matching, using config's controller name: {controller_name}\n"
+                result += f"Config Details for {config_name}:\n{config}\n\n"
+            if not controller_name:
+                return "Please provide a controller name to describe."
+            # First, determine the controller type
+            controller_type = None
+            for c_type, controllers in controllers.items():
+                if controller_name in controllers:
+                    controller_type = c_type
+                    break
+            if not controller_type:
+                return f"Controller '{controller_name}' not found."
+            # Get controller code and configs
+            controller_code = await client.controllers.get_controller(controller_type, controller_name)
+            controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
+            result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
+            template = await client.controllers.get_controller_config_template(controller_type, controller_name)
+            result += f"All configs available for controller:\n {controller_configs}"
+            result += f"\n\nController Config Template:\n{template}\n\n"
+            return result
         else:
-            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+            return "Invalid action. Use 'list' or 'describe', or omit for overview."
+            
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
 
 @mcp.tool()
-async def manage_controllers(
-        action: Literal["list", "get", "upsert", "delete"],
-        controller_type: Optional[Literal["directional_trading", "market_making", "generic"]] = None,
-        controller_name: Optional[str] = None,
-        controller_code: Optional[str] = None,
+async def modify_controllers(
+        action: Literal["upsert", "delete"],
+        target: Literal["controller", "config"],
+        # For controllers
+        controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
+        controller_name: str | None = None,
+        controller_code: str | None = None,
+        # For configs
+        config_name: str | None = None,
+        config_data: dict[str, Any] | None = None,
+        # For configs in bots
+        bot_name: str | None = None,
+        # Safety
+        confirm_override: bool = False,
 ) -> str:
     """
-    Manage controller files (controllers are substrategies).
-    If action is:
-    - 'list': will show all the controllers available by type.
-    - 'get': will get the code of the controller, this will be really useful when trying to create a controller.
-    configuration since you can understand how each parameter is used.
-    - 'upsert': you can modify the code of a controller or add it if it doesn't exist.
-    - 'delete': delete a controller
+    Create, update, or delete controllers and their configurations. If bot name is provided, it can only modify the config
+    in the bot deployed with that name.
+    
+    IMPORTANT: When creating a config without specifying config_data details, you MUST first use the explore_controllers tool
+    with action="describe" and the controller_name to understand what parameters are required. The config_data must include
+    ALL relevant parameters for the controller to function properly.
+    
+    Controllers = are essentially strategies that can be run in Hummingbot.
+    Configs = are the parameters that the controller uses to run.
 
     Args:
-        action: Action to perform ('list', 'get', 'upsert', 'delete')
-        controller_type: ("directional_trading", "market_making", "generic") is required for the actions 'get', 'upsert' and 'delete'.
-        controller_name: Name of the controller to manage (required for 'get', 'upsert', 'delete')
-        controller_code: Code to update, only required for the action 'upsert'.
+        action: "upsert" (create/update) or "delete"
+        target: "controller" (template) or "config" (instance)
+        confirm_override: Required True if overwriting existing
+        config_data: For config creation, MUST contain all required controller parameters. Use explore_controllers first!
+        
+    Workflow for creating a config:
+    1. Use explore_controllers(action="describe", controller_name="<name>") to see required parameters
+    2. Create config_data dict with ALL required parameters from the controller template
+    3. Call modify_controllers with the complete config_data
+        
+    Examples:
+    - Create new controller: modify_controllers("upsert", "controller", controller_type="market_making", ...)
+    - Create config: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...})
+    - Modify config from bot: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...}, bot_name="my_bot")
+    - Delete config: modify_controllers("delete", "config", config_name="old_strategy")
     """
     try:
         client = await hummingbot_client.get_client()
-        if action == "list":
-            result = await client.controllers.list_controllers()
-            return f"Available controllers: {result}"
-        elif action == "get":
-            result = await client.controllers.get_controller(controller_type, controller_name)
-            return f"Controller code: {result}"
-        elif action == "upsert":
-            result = await client.controllers.create_or_update_controller(controller_type, controller_name, controller_code)
-            return f"Upsert operation: {result}"
-        elif action == "delete":
-            result = await client.controllers.delete_controller(controller_type, controller_name)
-            return f"Delete operation: {result}"
+        
+        if target == "controller":
+            if action == "upsert":
+                if not controller_type or not controller_name or not controller_code:
+                    raise ValueError("controller_type, controller_name, and controller_code are required for controller upsert")
+                
+                # Check if controller exists
+                controllers = await client.controllers.list_controllers()
+                exists = controller_name in controllers.get(controller_type, [])
+                
+                if exists and not confirm_override:
+                    controller_code = await client.controllers.get_controller(controller_type, controller_name)
+                    return (f"Controller '{controller_name}' already exists and this is the current code: {controller_code}. "
+                            f"Set confirm_override=True to update it.")
+                
+                result = await client.controllers.create_or_update_controller(
+                    controller_type, controller_name, controller_code
+                )
+                return f"Controller {'updated' if exists else 'created'}: {result}"
+                
+            elif action == "delete":
+                if not controller_type or not controller_name:
+                    raise ValueError("controller_type and controller_name are required for controller delete")
+                    
+                result = await client.controllers.delete_controller(controller_type, controller_name)
+                return f"Controller deleted: {result}"
+                
+        elif target == "config":
+            if action == "upsert":
+                if not config_name or not config_data:
+                    raise ValueError("config_name and config_data are required for config upsert")
+
+                # Extract controller_type and controller_name from config_data
+                config_controller_type = config_data.get("controller_type")
+                config_controller_name = config_data.get("controller_name")
+                
+                if not config_controller_type or not config_controller_name:
+                    raise ValueError("config_data must include 'controller_type' and 'controller_name'")
+
+                # validate config first
+                await client.controllers.validate_controller_config(config_controller_type, config_controller_name, config_data)
+
+                if bot_name:
+                    if not confirm_override:
+                        current_configs = await client.controllers.get_bot_controller_configs(bot_name)
+                        config = next((c for c in current_configs if c.get("id") == config_name), None)
+                        if config:
+                            return (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
+                                    "Set confirm_override=True to update it.")
+                        else:
+                            update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                            return f"Config created in bot '{bot_name}': {update_op}"
+                    else:
+                        # Ensure config_data has the correct id
+                        if "id" not in config_data or config_data["id"] != config_name:
+                            config_data["id"] = config_name
+                        update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                        return f"Config updated in bot '{bot_name}': {update_op}"
+                else:
+                    # Ensure config_data has the correct id
+                    if "id" not in config_data or config_data["id"] != config_name:
+                        config_data["id"] = config_name
+
+                    controller_configs = await client.controllers.list_controller_configs()
+                    exists = config_name in controller_configs
+
+                    if exists and not confirm_override:
+                        existing_config = await client.controllers.get_controller_config(config_name)
+                        return (f"Config '{config_name}' already exists with data: {existing_config}."
+                                "Set confirm_override=True to update it.")
+
+                    result = await client.controllers.create_or_update_controller_config(config_name, config_data)
+                    return f"Config {'updated' if exists else 'created'}: {result}"
+                
+            elif action == "delete":
+                if not config_name:
+                    raise ValueError("config_name is required for config delete")
+                    
+                result = await client.controllers.delete_controller_config(config_name)
+                await client.bot_orchestration.deploy_v2_controllers()
+                return f"Config deleted: {result}"
         else:
-            raise ValueError("Invalid action. Must be 'list', 'get', 'upsert', or 'delete'.")
+            raise ValueError("Invalid target. Must be 'controller' or 'config'.")
+            
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    except Exception as e:
+        logger.error(f"Failed request to Hummingbot API: {e}")
+        raise ToolError(f"Failed to modify controllers/configs: {str(e)}")
 
 
 @mcp.tool()
 async def deploy_bot_with_controllers(
-    bot_name: str,
-    controller_configs: list[str],
-    account_name: str | None = "master_account",
-    max_global_drawdown_quote: float | None = None,
-    max_controller_drawdown_quote: float | None = None,
-    image: str = "hummingbot/hummingbot:latest",
+        bot_name: str,
+        controllers_config: list[str],
+        account_name: str | None = "master_account",
+        max_global_drawdown_quote: float | None = None,
+        max_controller_drawdown_quote: float | None = None,
+        image: str = "hummingbot/hummingbot:latest",
 ) -> str:
     """Deploy a bot with specified controller configurations.
     Args:
         bot_name: Name of the bot to deploy
-        controller_configs: List of controller configs to use for the bot deployment.
+        controllers_config: List of controller configs to use for the bot deployment.
         account_name: Account name to use for the bot (default: master_account)
         max_global_drawdown_quote: Maximum global drawdown in quote currency (optional) defaults to None.
         max_controller_drawdown_quote: Maximum drawdown per controller in quote currency (optional) defaults to None.
@@ -500,7 +651,7 @@ async def deploy_bot_with_controllers(
         # Validate controller configs
         result = await client.bot_orchestration.deploy_v2_controllers(
             instance_name=bot_name,
-            controller_configs=controller_configs,
+            controllers_config=controllers_config,
             credentials_profile=account_name,
             max_global_drawdown_quote=max_global_drawdown_quote,
             max_controller_drawdown_quote=max_controller_drawdown_quote,
@@ -509,7 +660,52 @@ async def deploy_bot_with_controllers(
         return f"Bot Deployment Result: {result}"
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError("Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+
+@mcp.tool()
+async def get_active_bots_status():
+    """
+    Get the status of all active bots. Including the unrealized PnL, realized PnL, volume traded, latest logs, etc.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        active_bots = await client.bot_orchestration.get_active_bots_status()
+        return f"Active Bots Status: {active_bots}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+
+
+@mcp.tool()
+async def stop_bot_or_controllers(
+        bot_name: str,
+        controller_names: Optional[list[str]] = None,
+):
+    """
+    Stop and archive a bot forever or stop the execution of a controller of a runnning bot. If the controllers to stop
+    are not specified, it will stop the bot execution and archive it forever, if they are specified, will only stop
+    the execution of those controllers and the bot will still be running with the rest of the controllers.
+    Args:
+        bot_name: Name of the bot to stop
+        controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        if controller_names is None or len(controller_names) == 0:
+            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
+            return f"Bot execution stopped and archived: {result}"
+        else:
+            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
+                     for controller in controller_names]
+            result = await asyncio.gather(*tasks)
+            return f"Controller execution stopped: {result}"
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
 
 
 async def main():
