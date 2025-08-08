@@ -4,7 +4,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y git && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     pip install uv
-COPY pyproject.toml uv.lock hummingbot_mcp/ README.md ./
+COPY pyproject.toml uv.lock README.md main.py ./
+COPY hummingbot_mcp/ ./hummingbot_mcp/
 RUN uv venv && uv pip install .
 
 # Stage 2: Runtime
