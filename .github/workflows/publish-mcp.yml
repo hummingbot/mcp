@@ -1,0 +1,103 @@
+name: Publish MCP server
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write  # required for GitHub OIDC to the MCP Registry
+
+env:
+  IMAGE_NAME: hummingbot/hummingbot-mcp
+  SERVER_NAME: io.github.hummingbot/mcp
+  SERVER_JSON: server.json
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version/tag
+        id: vars
+        run: |
+          TAG="${GITHUB_REF_NAME#refs/tags/}"
+          # Sanitize: strip leading "v" for server.json version fields
+          SANITIZED="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "sanitized=${SANITIZED}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (cross-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            docker.io/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+            docker.io/${{ env.IMAGE_NAME }}:latest
+          labels: |
+            io.modelcontextprotocol.server.name=${{ env.SERVER_NAME }}
+
+  publish-to-mcp-registry:
+    needs: build-and-push-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deps (jq + Homebrew)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq build-essential curl git
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> "$HOME/.bashrc"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install mcp-publisher
+
+      - name: Derive version/tag (again in this job)
+        id: vars
+        run: |
+          TAG="${GITHUB_REF_NAME#refs/tags/}"
+          SANITIZED="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "sanitized=${SANITIZED}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync server.json version to tag
+        run: |
+          jq --arg v "${{ steps.vars.outputs.sanitized }}" \
+             '.version=$v | .packages[0].version=$v' \
+             "${{ env.SERVER_JSON }}" > server.json.tmp
+          mv server.json.tmp "${{ env.SERVER_JSON }}"
+          echo "Updated server.json:"
+          cat "${{ env.SERVER_JSON }}"
+
+      - name: Login to MCP Registry (GitHub OIDC)
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        env:
+          MCP_REGISTRY: https://registry.modelcontextprotocol.io
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          mcp-publisher publish --registry "$MCP_REGISTRY" --file "${{ env.SERVER_JSON }}"
