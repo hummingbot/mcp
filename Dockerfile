@@ -24,8 +24,14 @@ COPY README.md ./
 COPY main.py ./
 COPY pyproject.toml ./
 
+# Create directory for persistent config
+RUN mkdir -p /root/.hummingbot_mcp
+
 # Set environment variable to indicate we're running in Docker
 ENV DOCKER_CONTAINER=true
+
+# Volume for persistent server configuration
+VOLUME ["/root/.hummingbot_mcp"]
 
 # Run the MCP server using the pre-built venv
 ENTRYPOINT ["/app/.venv/bin/python", "main.py"]
