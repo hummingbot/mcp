@@ -585,13 +585,13 @@ async def modify_controllers(
                             return (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
                                     "Set confirm_override=True to update it.")
                         else:
-                            update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                            update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
                             return f"Config created in bot '{bot_name}': {update_op}"
                     else:
                         # Ensure config_data has the correct id
                         if "id" not in config_data or config_data["id"] != config_name:
                             config_data["id"] = config_name
-                        update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                        update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
                         return f"Config updated in bot '{bot_name}': {update_op}"
                 else:
                     # Ensure config_data has the correct id
@@ -668,10 +668,23 @@ async def deploy_bot_with_controllers(
 async def get_active_bots_status():
     """
     Get the status of all active bots. Including the unrealized PnL, realized PnL, volume traded, latest logs, etc.
+    Note: Both error logs and general logs are limited to the last 5 entries. Use get_bot_logs for more detailed log searching.
     """
     try:
         client = await hummingbot_client.get_client()
         active_bots = await client.bot_orchestration.get_active_bots_status()
+
+        # Limit logs to last 5 entries for each bot to reduce output size
+        if isinstance(active_bots, dict) and "data" in active_bots:
+            for bot_name, bot_data in active_bots["data"].items():
+                if isinstance(bot_data, dict):
+                    # Keep only the last 5 error logs
+                    if "error_logs" in bot_data:
+                        bot_data["error_logs"] = bot_data["error_logs"][-5:]
+                    # Keep only the last 5 general logs
+                    if "general_logs" in bot_data:
+                        bot_data["general_logs"] = bot_data["general_logs"][-5:]
+
         return f"Active Bots Status: {active_bots}"
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -680,32 +693,148 @@ async def get_active_bots_status():
 
 
 @mcp.tool()
+async def get_bot_logs(
+        bot_name: str,
+        log_type: Literal["error", "general", "all"] = "all",
+        limit: int = 50,
+        search_term: str | None = None,
+) -> str:
+    """
+    Get detailed logs for a specific bot with filtering options.
+    
+    Args:
+        bot_name: Name of the bot to get logs for
+        log_type: Type of logs to retrieve ('error', 'general', or 'all')
+        limit: Maximum number of log entries to return (default: 50, max: 1000)
+        search_term: Optional search term to filter logs by message content
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        active_bots = await client.bot_orchestration.get_active_bots_status()
+        
+        if not isinstance(active_bots, dict) or "data" not in active_bots:
+            return f"No active bots data found"
+            
+        if bot_name not in active_bots["data"]:
+            available_bots = list(active_bots["data"].keys())
+            return f"Bot '{bot_name}' not found. Available bots: {available_bots}"
+            
+        bot_data = active_bots["data"][bot_name]
+        
+        # Validate limit
+        limit = min(max(1, limit), 1000)
+        
+        logs = []
+        
+        # Collect error logs if requested
+        if log_type in ["error", "all"] and "error_logs" in bot_data:
+            error_logs = bot_data["error_logs"]
+            for log_entry in error_logs:
+                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
+                    log_entry["log_category"] = "error"
+                    logs.append(log_entry)
+        
+        # Collect general logs if requested
+        if log_type in ["general", "all"] and "general_logs" in bot_data:
+            general_logs = bot_data["general_logs"]
+            for log_entry in general_logs:
+                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
+                    log_entry["log_category"] = "general"
+                    logs.append(log_entry)
+        
+        # Sort logs by timestamp (most recent first) and apply limit
+        logs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        logs = logs[:limit]
+        
+        result = {
+            "bot_name": bot_name,
+            "log_type": log_type,
+            "search_term": search_term,
+            "total_logs_returned": len(logs),
+            "logs": logs
+        }
+        
+        return f"Bot Logs Result: {result}"
+        
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    except Exception as e:
+        logger.error(f"get_bot_logs failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get bot logs: {str(e)}")
+
+
+@mcp.tool()
+async def manage_bot_execution(
+        bot_name: str,
+        action: Literal["stop_bot", "stop_controllers", "start_controllers"],
+        controller_names: Optional[list[str]] = None,
+):
+    """
+    Manage bot and controller execution states.
+    
+    Actions:
+    - "stop_bot": Stop and archive the entire bot forever (controller_names not needed)
+    - "stop_controllers": Stop specific controllers by setting manual_kill_switch to True (requires controller_names)
+    - "start_controllers": Start/resume specific controllers by setting manual_kill_switch to False (requires controller_names)
+    
+    Args:
+        bot_name: Name of the bot to manage
+        action: The action to perform ("stop_bot", "stop_controllers", or "start_controllers")
+        controller_names: List of controller names (required for stop_controllers and start_controllers actions)
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        
+        if action == "stop_bot":
+            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
+            return f"Bot execution stopped and archived: {result}"
+            
+        elif action == "stop_controllers":
+            if controller_names is None or len(controller_names) == 0:
+                raise ValueError("controller_names is required for stop_controllers action")
+            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
+                     for controller in controller_names]
+            result = await asyncio.gather(*tasks)
+            return f"Controllers stopped: {result}"
+            
+        elif action == "start_controllers":
+            if controller_names is None or len(controller_names) == 0:
+                raise ValueError("controller_names is required for start_controllers action")
+            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": False})
+                     for controller in controller_names]
+            result = await asyncio.gather(*tasks)
+            return f"Controllers started: {result}"
+            
+        else:
+            raise ValueError(f"Invalid action: {action}")
+            
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    except Exception as e:
+        logger.error(f"manage_bot_execution failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage bot execution: {str(e)}")
+
+
+# Backward compatibility alias (deprecated)
+@mcp.tool()
 async def stop_bot_or_controllers(
         bot_name: str,
         controller_names: Optional[list[str]] = None,
 ):
     """
-    Stop and archive a bot forever or stop the execution of a controller of a runnning bot. If the controllers to stop
-    are not specified, it will stop the bot execution and archive it forever, if they are specified, will only stop
-    the execution of those controllers and the bot will still be running with the rest of the controllers.
+    [DEPRECATED - Use manage_bot_execution instead]
+    Stop and archive a bot forever or stop the execution of controllers in a running bot.
+    
     Args:
         bot_name: Name of the bot to stop
         controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
     """
-    try:
-        client = await hummingbot_client.get_client()
-        if controller_names is None or len(controller_names) == 0:
-            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
-            return f"Bot execution stopped and archived: {result}"
-        else:
-            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
-                     for controller in controller_names]
-            result = await asyncio.gather(*tasks)
-            return f"Controller execution stopped: {result}"
-    except HBConnectionError as e:
-        logger.error(f"Failed to connect to Hummingbot API: {e}")
-        raise ToolError(
-            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    action = "stop_bot" if controller_names is None or len(controller_names) == 0 else "stop_controllers"
+    return await manage_bot_execution(bot_name, action, controller_names)
 
 
 async def main():
