@@ -236,21 +236,53 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
    docker ps
    ```
 
+## Managing Multiple API Servers
+
+The MCP server now supports managing multiple Hummingbot API servers. This is useful when you have multiple deployments or environments.
+
+### Initial Setup
+
+On first run, the server creates a default server from environment variables (or uses `http://localhost:8000` with default credentials). Configuration is stored in `~/.hummingbot_mcp/servers.yml`.
+
+### Using the configure_api_servers Tool
+
+```
+# List all configured servers
+configure_api_servers()
+
+# Add a new server
+configure_api_servers(
+    action="add",
+    name="production",
+    url="http://prod-server:8000",
+    username="admin",
+    password="secure_password"
+)
+
+# Switch to a different server
+configure_api_servers(action="set_default", name="production")
+
+# Remove a server
+configure_api_servers(action="remove", name="old_server")
+```
+
+All subsequent API calls will use the currently selected default server.
+
 ## Environment Variables
 
 The following environment variables can be set in your `.env` file for the MCP server:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HUMMINGBOT_API_URL` | `http://localhost:8000` | URL of the Hummingbot API server |
-| `HUMMINGBOT_USERNAME` | `admin` | Username for API authentication |
-| `HUMMINGBOT_PASSWORD` | `admin` | Password for API authentication |
+| `HUMMINGBOT_API_URL` | `http://localhost:8000` | Initial default API server URL (used only on first run) |
+| `HUMMINGBOT_USERNAME` | `admin` | Initial username (used only on first run) |
+| `HUMMINGBOT_PASSWORD` | `admin` | Initial password (used only on first run) |
 | `HUMMINGBOT_TIMEOUT` | `30.0` | Connection timeout in seconds |
 | `HUMMINGBOT_MAX_RETRIES` | `3` | Maximum number of retry attempts |
 | `HUMMINGBOT_RETRY_DELAY` | `2.0` | Delay between retries in seconds |
 | `HUMMINGBOT_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 
-**Note**: Hummingbot API server environment variables are configured directly in the `docker-compose.yml` file.
+**Note**: After initial setup, use the `configure_api_servers` tool to manage servers. Environment variables are only used to create the initial default server.
 
 ## Requirements
 
@@ -261,12 +293,24 @@ The following environment variables can be set in your `.env` file for the MCP s
 ## Available Tools
 
 The MCP server provides tools for:
-- Account management
-- Portfolio balances
-- Order placement
+
+### Server Management
+- **configure_api_servers**: Manage multiple Hummingbot API server connections
+  - List all configured servers
+  - Add new servers with credentials
+  - Set default server (automatically reconnects client)
+  - Remove servers
+  - Configuration persists in `~/.hummingbot_mcp/servers.yml`
+
+### Trading & Account Management
+- Account management and connector setup
+- Portfolio balances and distribution
+- Order placement and management
 - Position management
 - Market data (prices, order books, candles)
 - Funding rates
+- Bot deployment and management
+- Controller configuration
 
 ## Development
 
