@@ -7,13 +7,14 @@ import os
 import aiohttp
 from pydantic import BaseModel, Field, field_validator
 
+from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import ConfigurationError
 
 
 class Settings(BaseModel):
     """Application settings"""
 
-    # API Configuration
+    # API Configuration - now loaded from api_servers_config
     api_url: str = Field(default="http://localhost:8000")
     api_username: str = Field(default="admin")
     api_password: str = Field(default="admin")
@@ -45,14 +46,27 @@ class Settings(BaseModel):
         """Get aiohttp ClientTimeout object"""
         return aiohttp.ClientTimeout(total=self.connection_timeout)
 
+    def reload_from_default_server(self):
+        """Reload API settings from the default server configuration"""
+        try:
+            default_server = api_servers_config.get_default_server()
+            self.api_url = default_server.url
+            self.api_username = default_server.username
+            self.api_password = default_server.password
+        except Exception as e:
+            raise ConfigurationError(f"Failed to reload settings from default server: {e}")
+
 
 def get_settings() -> Settings:
-    """Get application settings from environment variables"""
+    """Get application settings from default API server configuration"""
     try:
+        # Load default server from api_servers_config
+        default_server = api_servers_config.get_default_server()
+
         return Settings(
-            api_url=os.getenv("HUMMINGBOT_API_URL", "http://localhost:8000"),
-            api_username=os.getenv("HUMMINGBOT_USERNAME", "admin"),
-            api_password=os.getenv("HUMMINGBOT_PASSWORD", "admin"),
+            api_url=default_server.url,
+            api_username=default_server.username,
+            api_password=default_server.password,
             connection_timeout=float(os.getenv("HUMMINGBOT_TIMEOUT", "30.0")),
             max_retries=int(os.getenv("HUMMINGBOT_MAX_RETRIES", "3")),
             retry_delay=float(os.getenv("HUMMINGBOT_RETRY_DELAY", "2.0")),

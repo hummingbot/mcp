@@ -9,6 +9,7 @@ from typing import Any, Literal, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
 from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
@@ -63,6 +64,91 @@ async def setup_connector(
     except Exception as e:
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to setup connector: {str(e)}")
+
+
+@mcp.tool()
+async def configure_api_servers(
+        action: str | None = None,
+        name: str | None = None,
+        url: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+) -> str:
+    """Configure API servers using progressive disclosure.
+
+    This tool helps you manage multiple Hummingbot API servers with a simple flow:
+    1. No parameters → List all configured servers
+    2. action="add" + name + url (+ optional username/password) → Add a new server
+    3. action="set_default" + name → Set a server as default (reconnects client)
+    4. action="remove" + name → Remove a server
+
+    Args:
+        action: Action to perform ('add', 'set_default', 'remove'). Leave empty to list servers.
+        name: Server name (required for all actions)
+        url: API URL (required for 'add')
+        username: API username (optional for 'add', defaults to 'admin')
+        password: API password (optional for 'add', defaults to 'admin')
+    """
+    try:
+        # No action = list servers
+        if action is None:
+            servers = api_servers_config.list_servers()
+            result = "Configured API Servers:\n\n"
+            for server_name, server_info in servers.items():
+                default_marker = " (DEFAULT)" if server_info["is_default"] else ""
+                result += f"- {server_name}{default_marker}\n"
+                result += f"  URL: {server_info['url']}\n"
+                result += f"  Username: {server_info['username']}\n\n"
+            return result
+
+        # Validate name for all actions
+        if name is None:
+            return "Error: 'name' parameter is required for all actions"
+
+        # Add server
+        if action == "add":
+            if url is None:
+                return "Error: 'url' parameter is required for 'add' action"
+
+            result = api_servers_config.add_server(
+                name=name,
+                url=url,
+                username=username or "admin",
+                password=password or "admin",
+            )
+            return result
+
+        # Set default server
+        elif action == "set_default":
+            result = api_servers_config.set_default(name)
+
+            # Reload settings and reconnect client
+            settings.reload_from_default_server()
+            await hummingbot_client.close()
+            await hummingbot_client.initialize()
+
+            return f"{result}. Client reconnected to new default server."
+
+        # Remove server
+        elif action == "remove":
+            result = api_servers_config.remove_server(name)
+
+            # If we removed the default, reload settings
+            default_server = api_servers_config.get_default_server()
+            if default_server.name != name:
+                settings.reload_from_default_server()
+                await hummingbot_client.close()
+                await hummingbot_client.initialize()
+                result += f" New default server is '{default_server.name}'. Client reconnected."
+
+            return result
+
+        else:
+            return f"Error: Invalid action '{action}'. Use 'add', 'set_default', or 'remove'"
+
+    except Exception as e:
+        logger.error(f"configure_api_servers failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to configure API servers: {str(e)}")
 
 
 @mcp.tool()
