@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2.11.2",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.0",
+    "aiohttp>=3.9.0",
 ]
 
 [project.urls]
@@ -35,6 +36,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["hummingbot_mcp"]
+
+[tool.setuptools.package-data]
+hummingbot_mcp = ["../docker-compose-api.yml", "../scripts/*.sh"]
 
 [tool.ruff]
 line-length = 140

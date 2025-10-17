@@ -270,6 +270,7 @@ name = "hummingbot-mcp"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "hummingbot-api-client" },
     { name = "mcp", extra = ["cli"] },
     { name = "pydantic" },
@@ -284,6 +285,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "hummingbot-api-client", specifier = "==1.1.4" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "pydantic", specifier = ">=2.11.2" },
