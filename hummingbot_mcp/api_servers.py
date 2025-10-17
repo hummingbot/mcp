@@ -3,10 +3,12 @@ API Servers configuration management
 Manages multiple Hummingbot API server connections
 """
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
@@ -185,6 +187,40 @@ class APIServersConfig:
 
         self._save()
         return f"Server '{name}' removed successfully"
+
+    async def health_check(self, server_name: str | None = None) -> tuple[bool, str]:
+        """
+        Check if a server is reachable and healthy
+
+        Args:
+            server_name: Server name to check. If None, checks default server
+
+        Returns:
+            Tuple of (is_healthy, message)
+        """
+        if server_name is None:
+            server = self.get_default_server()
+        else:
+            if server_name not in self._servers:
+                return False, f"Server '{server_name}' not found"
+            server = self._servers[server_name]
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # Try to hit the health endpoint or root
+                health_url = f"{server.url.rstrip('/')}/health"
+                async with session.get(health_url) as response:
+                    if response.status == 200:
+                        return True, f"Server '{server.name}' is healthy"
+                    else:
+                        return False, f"Server '{server.name}' returned status {response.status}"
+        except aiohttp.ClientConnectorError:
+            return False, f"Cannot connect to server '{server.name}' at {server.url}. Is it running?"
+        except asyncio.TimeoutError:
+            return False, f"Server '{server.name}' timed out. Is it running?"
+        except Exception as e:
+            return False, f"Health check failed for server '{server.name}': {str(e)}"
 
 
 # Global instance
