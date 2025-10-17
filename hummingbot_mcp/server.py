@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
 from hummingbot_mcp.hummingbot_client import hummingbot_client
+from hummingbot_mcp.local_deployment import local_api
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools.account import SetupConnectorRequest
 
@@ -120,6 +121,11 @@ async def configure_api_servers(
 
         # Set default server
         elif action == "set_default":
+            # Health check before setting as default
+            is_healthy, health_msg = await api_servers_config.health_check(name)
+            if not is_healthy:
+                return f"Cannot set '{name}' as default: {health_msg}\n\nPlease ensure the server is running before setting it as default."
+
             result = api_servers_config.set_default(name)
 
             # Reload settings and reconnect client
@@ -568,7 +574,7 @@ async def explore_controllers(
             return result
         else:
             return "Invalid action. Use 'list' or 'describe', or omit for overview."
-            
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -621,33 +627,33 @@ async def modify_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-        
+
         if target == "controller":
             if action == "upsert":
                 if not controller_type or not controller_name or not controller_code:
                     raise ValueError("controller_type, controller_name, and controller_code are required for controller upsert")
-                
+
                 # Check if controller exists
                 controllers = await client.controllers.list_controllers()
                 exists = controller_name in controllers.get(controller_type, [])
-                
+
                 if exists and not confirm_override:
                     controller_code = await client.controllers.get_controller(controller_type, controller_name)
                     return (f"Controller '{controller_name}' already exists and this is the current code: {controller_code}. "
                             f"Set confirm_override=True to update it.")
-                
+
                 result = await client.controllers.create_or_update_controller(
                     controller_type, controller_name, controller_code
                 )
                 return f"Controller {'updated' if exists else 'created'}: {result}"
-                
+
             elif action == "delete":
                 if not controller_type or not controller_name:
                     raise ValueError("controller_type and controller_name are required for controller delete")
-                    
+
                 result = await client.controllers.delete_controller(controller_type, controller_name)
                 return f"Controller deleted: {result}"
-                
+
         elif target == "config":
             if action == "upsert":
                 if not config_name or not config_data:
@@ -656,7 +662,7 @@ async def modify_controllers(
                 # Extract controller_type and controller_name from config_data
                 config_controller_type = config_data.get("controller_type")
                 config_controller_name = config_data.get("controller_name")
-                
+
                 if not config_controller_type or not config_controller_name:
                     raise ValueError("config_data must include 'controller_type' and 'controller_name'")
 
@@ -694,17 +700,17 @@ async def modify_controllers(
 
                     result = await client.controllers.create_or_update_controller_config(config_name, config_data)
                     return f"Config {'updated' if exists else 'created'}: {result}"
-                
+
             elif action == "delete":
                 if not config_name:
                     raise ValueError("config_name is required for config delete")
-                    
+
                 result = await client.controllers.delete_controller_config(config_name)
                 await client.bot_orchestration.deploy_v2_controllers()
                 return f"Config deleted: {result}"
         else:
             raise ValueError("Invalid target. Must be 'controller' or 'config'.")
-            
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -797,21 +803,21 @@ async def get_bot_logs(
     try:
         client = await hummingbot_client.get_client()
         active_bots = await client.bot_orchestration.get_active_bots_status()
-        
+
         if not isinstance(active_bots, dict) or "data" not in active_bots:
-            return f"No active bots data found"
-            
+            return "No active bots data found"
+
         if bot_name not in active_bots["data"]:
             available_bots = list(active_bots["data"].keys())
             return f"Bot '{bot_name}' not found. Available bots: {available_bots}"
-            
+
         bot_data = active_bots["data"][bot_name]
-        
+
         # Validate limit
         limit = min(max(1, limit), 1000)
-        
+
         logs = []
-        
+
         # Collect error logs if requested
         if log_type in ["error", "all"] and "error_logs" in bot_data:
             error_logs = bot_data["error_logs"]
@@ -819,7 +825,7 @@ async def get_bot_logs(
                 if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
                     log_entry["log_category"] = "error"
                     logs.append(log_entry)
-        
+
         # Collect general logs if requested
         if log_type in ["general", "all"] and "general_logs" in bot_data:
             general_logs = bot_data["general_logs"]
@@ -827,11 +833,11 @@ async def get_bot_logs(
                 if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
                     log_entry["log_category"] = "general"
                     logs.append(log_entry)
-        
+
         # Sort logs by timestamp (most recent first) and apply limit
         logs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         logs = logs[:limit]
-        
+
         result = {
             "bot_name": bot_name,
             "log_type": log_type,
@@ -839,9 +845,9 @@ async def get_bot_logs(
             "total_logs_returned": len(logs),
             "logs": logs
         }
-        
+
         return f"Bot Logs Result: {result}"
-        
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -872,11 +878,11 @@ async def manage_bot_execution(
     """
     try:
         client = await hummingbot_client.get_client()
-        
+
         if action == "stop_bot":
             result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
             return f"Bot execution stopped and archived: {result}"
-            
+
         elif action == "stop_controllers":
             if controller_names is None or len(controller_names) == 0:
                 raise ValueError("controller_names is required for stop_controllers action")
@@ -884,7 +890,7 @@ async def manage_bot_execution(
                      for controller in controller_names]
             result = await asyncio.gather(*tasks)
             return f"Controllers stopped: {result}"
-            
+
         elif action == "start_controllers":
             if controller_names is None or len(controller_names) == 0:
                 raise ValueError("controller_names is required for start_controllers action")
@@ -892,10 +898,10 @@ async def manage_bot_execution(
                      for controller in controller_names]
             result = await asyncio.gather(*tasks)
             return f"Controllers started: {result}"
-            
+
         else:
             raise ValueError(f"Invalid action: {action}")
-            
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -914,13 +920,134 @@ async def stop_bot_or_controllers(
     """
     [DEPRECATED - Use manage_bot_execution instead]
     Stop and archive a bot forever or stop the execution of controllers in a running bot.
-    
+
     Args:
         bot_name: Name of the bot to stop
         controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
     """
     action = "stop_bot" if controller_names is None or len(controller_names) == 0 else "stop_controllers"
     return await manage_bot_execution(bot_name, action, controller_names)
+
+
+@mcp.tool()
+async def manage_local_api(
+        action: Literal["status", "setup", "start", "stop"] | None = None,
+        interactive: bool = False,
+        username: str = "admin",
+        password: str = "admin",
+        config_password: str = "admin",
+) -> str:
+    """
+    Manage local Hummingbot API deployment.
+
+    This tool helps you deploy and manage a local instance of the Hummingbot API using Docker.
+    The API will be deployed to ~/.hummingbot_api by default.
+
+    Progressive flow:
+    1. No parameters → Show current status
+    2. action="setup" → Deploy local API with custom or default credentials
+    3. action="start" → Start the API containers
+    4. action="stop" → Stop the API containers
+
+    IMPORTANT: For production use, always specify custom credentials!
+
+    Args:
+        action: Action to perform ('status', 'setup', 'start', 'stop'). Leave empty to show status.
+        interactive: If True, runs interactive bash setup with prompts (only for 'setup' action)
+        username: API username for HTTP Basic Auth (default: 'admin' - CHANGE THIS FOR PRODUCTION!)
+        password: API password for HTTP Basic Auth (default: 'admin' - CHANGE THIS FOR PRODUCTION!)
+        config_password: Password to encrypt bot credentials (default: 'admin' - CHANGE THIS FOR PRODUCTION!)
+
+    Examples:
+        # Deploy with default credentials (development only)
+        manage_local_api(action="setup")
+
+        # Deploy with custom credentials (recommended)
+        manage_local_api(action="setup", username="myuser", password="StrongPass123", config_password="BotPass456")
+
+        # Interactive setup (prompts for all values)
+        manage_local_api(action="setup", interactive=True)
+    """
+    try:
+        # No action = show status
+        if action is None or action == "status":
+            status = await local_api.status()
+            result = "Local Hummingbot API Status:\n\n"
+            result += f"Deployed: {'Yes' if status['deployed'] else 'No'}\n"
+            result += f"Running: {'Yes' if status['running'] else 'No'}\n"
+            result += f"Deployment Path: {status['deployment_path']}\n"
+            if status['api_url']:
+                result += f"API URL: {status['api_url']}\n"
+                result += f"API Docs: {status['api_url']}/docs\n"
+
+            if not status['deployed']:
+                result += "\n💡 Tip: Use action='setup' to deploy the local API"
+            elif not status['running']:
+                result += "\n💡 Tip: Use action='start' to start the API"
+
+            return result
+
+        # Setup action
+        elif action == "setup":
+            # Warn if using default credentials
+            using_defaults = (username == "admin" and password == "admin" and config_password == "admin")
+
+            if interactive:
+                success, message = await local_api.setup_interactive()
+            else:
+                if using_defaults:
+                    logger.warning("⚠️  Deploying with default credentials! This is only suitable for development/testing.")
+                    logger.warning("💡 For production, use: manage_local_api(action='setup', username='...', password='...', config_password='...')")
+
+                success, message = await local_api.setup_non_interactive(
+                    username=username,
+                    password=password,
+                    config_password=config_password
+                )
+
+            if success:
+                # Add security warning to success message if using defaults
+                if using_defaults and not interactive:
+                    message += "\n\n⚠️  WARNING: Using default credentials (admin/admin)"
+                    message += "\n   This is ONLY suitable for local development/testing!"
+                    message += "\n   For production, redeploy with custom credentials:"
+                    message += "\n   manage_local_api(action='setup', username='myuser', password='StrongPass123', config_password='BotPass456')"
+
+                # Automatically add as a server
+                try:
+                    api_servers_config.add_server(
+                        name="localhost",
+                        url="http://localhost:8000",
+                        username=username,
+                        password=password
+                    )
+                    message += "\n\n✅ Server 'localhost' added to your configuration."
+                    message += "\n💡 Use configure_api_servers(action='set_default', name='localhost') to switch to it."
+                except ValueError as e:
+                    # Server might already exist
+                    if "already exists" in str(e):
+                        message += "\n\nℹ️ Server 'localhost' already exists in your configuration."
+                    else:
+                        raise
+
+            return message
+
+        # Start action
+        elif action == "start":
+            success, message = await local_api.start()
+            return message
+
+        # Stop action
+        elif action == "stop":
+            success, message = await local_api.stop()
+            return message
+
+        else:
+            return f"Error: Invalid action '{action}'. Use 'status', 'setup', 'start', or 'stop'"
+
+    except Exception as e:
+        logger.error(f"manage_local_api failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage local API: {str(e)}")
 
 
 async def main():
@@ -937,7 +1064,26 @@ async def main():
         logger.info(f"Successfully connected to Hummingbot API. Found {len(accounts)} accounts.")
     except Exception as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
-        logger.error("Please ensure Hummingbot is running and API credentials are correct.")
+        logger.error("Please ensure Hummingbot API is running and credentials are correct.")
+
+        # Check if local API is available but not running
+        local_status = await local_api.status()
+
+        if settings.api_url == "http://localhost:8000":
+            # User is trying to connect to localhost
+            if local_status['deployed'] and not local_status['running']:
+                logger.warning("⚠️  Local API is deployed but not running.")
+                logger.warning("💡 Use the 'manage_local_api' tool with action='start' to start it.")
+            elif not local_status['deployed']:
+                logger.warning("⚠️  No local Hummingbot API detected.")
+                logger.warning("💡 Use the 'manage_local_api' tool with action='setup' to deploy one automatically.")
+                logger.warning(f"   The API will be deployed to: {local_status['deployment_path']}")
+        else:
+            logger.warning(f"⚠️  Cannot reach API at {settings.api_url}")
+            logger.warning("💡 Options:")
+            logger.warning("   1. Ensure the remote API is running and accessible")
+            logger.warning("   2. Deploy a local API using 'manage_local_api' tool with action='setup'")
+
         # Don't exit - let MCP server start anyway and handle errors per request
 
     # Run the server with FastMCP
