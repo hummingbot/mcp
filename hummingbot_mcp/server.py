@@ -5,7 +5,7 @@ Main MCP server for Hummingbot API integration
 import asyncio
 import logging
 import sys
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -493,9 +493,9 @@ async def explore_controllers(
 ) -> str:
     """
     Explore and understand controllers and their configs.
-    
+
     Use this tool to discover what's available and understand how things work.
-    
+
     Progressive flow:
     1. action="list" → List all controllers and their configs
     2. action="list" + controller_type → List controllers of that type with config counts
@@ -503,18 +503,18 @@ async def explore_controllers(
     4. action="describe" + config_name → Show specific config details + which controller it uses
 
     Common Enum Values for Controller Configs:
-    
+
     Position Mode (position_mode):
     - "HEDGE" - Allows holding both long and short positions simultaneously
     - "ONEWAY" - Allows only one direction position at a time
     - Note: Use as string value, e.g., position_mode: "HEDGE"
-    
+
     Trade Side (side):
     - 1 or "BUY" - For long/buy positions
-    - 2 or "SELL" - For short/sell positions  
+    - 2 or "SELL" - For short/sell positions
     - 3 - Other trade types
     - Note: Numeric values are required for controller configs
-    
+
     Order Type (order_type, open_order_type, take_profit_order_type, etc.):
     - 1 or "MARKET" - Market order
     - 2 or "LIMIT" - Limit order
@@ -600,11 +600,11 @@ async def modify_controllers(
     """
     Create, update, or delete controllers and their configurations. If bot name is provided, it can only modify the config
     in the bot deployed with that name.
-    
+
     IMPORTANT: When creating a config without specifying config_data details, you MUST first use the explore_controllers tool
     with action="describe" and the controller_name to understand what parameters are required. The config_data must include
     ALL relevant parameters for the controller to function properly.
-    
+
     Controllers = are essentially strategies that can be run in Hummingbot.
     Configs = are the parameters that the controller uses to run.
 
@@ -613,12 +613,12 @@ async def modify_controllers(
         target: "controller" (template) or "config" (instance)
         confirm_override: Required True if overwriting existing
         config_data: For config creation, MUST contain all required controller parameters. Use explore_controllers first!
-        
+
     Workflow for creating a config:
     1. Use explore_controllers(action="describe", controller_name="<name>") to see required parameters
     2. Create config_data dict with ALL required parameters from the controller template
     3. Call modify_controllers with the complete config_data
-        
+
     Examples:
     - Create new controller: modify_controllers("upsert", "controller", controller_type="market_making", ...)
     - Create config: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...})
@@ -793,7 +793,7 @@ async def get_bot_logs(
 ) -> str:
     """
     Get detailed logs for a specific bot with filtering options.
-    
+
     Args:
         bot_name: Name of the bot to get logs for
         log_type: Type of logs to retrieve ('error', 'general', or 'all')
@@ -861,16 +861,16 @@ async def get_bot_logs(
 async def manage_bot_execution(
         bot_name: str,
         action: Literal["stop_bot", "stop_controllers", "start_controllers"],
-        controller_names: Optional[list[str]] = None,
+        controller_names: list[str] | None = None,
 ):
     """
     Manage bot and controller execution states.
-    
+
     Actions:
     - "stop_bot": Stop and archive the entire bot forever (controller_names not needed)
     - "stop_controllers": Stop specific controllers by setting manual_kill_switch to True (requires controller_names)
     - "start_controllers": Start/resume specific controllers by setting manual_kill_switch to False (requires controller_names)
-    
+
     Args:
         bot_name: Name of the bot to manage
         action: The action to perform ("stop_bot", "stop_controllers", or "start_controllers")
@@ -915,7 +915,7 @@ async def manage_bot_execution(
 @mcp.tool()
 async def stop_bot_or_controllers(
         bot_name: str,
-        controller_names: Optional[list[str]] = None,
+        controller_names: list[str] | None = None,
 ):
     """
     [DEPRECATED - Use manage_bot_execution instead]

@@ -3,7 +3,6 @@ API Servers configuration management
 Manages multiple Hummingbot API server connections
 """
 
-import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -69,7 +68,7 @@ class APIServersConfig:
     def _load(self):
         """Load servers from YAML file"""
         try:
-            with open(self.config_path, "r") as f:
+            with open(self.config_path) as f:
                 data = yaml.safe_load(f) or {}
                 servers_data = data.get("servers", [])
 
@@ -217,7 +216,7 @@ class APIServersConfig:
                         return False, f"Server '{server.name}' returned status {response.status}"
         except aiohttp.ClientConnectorError:
             return False, f"Cannot connect to server '{server.name}' at {server.url}. Is it running?"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False, f"Server '{server.name}' timed out. Is it running?"
         except Exception as e:
             return False, f"Health check failed for server '{server.name}': {str(e)}"
