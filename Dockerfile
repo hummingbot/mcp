@@ -35,7 +35,6 @@ COPY hummingbot_mcp/ ./hummingbot_mcp/
 COPY README.md ./
 COPY main.py ./
 COPY pyproject.toml ./
-COPY docker-compose-api.yml ./
 COPY scripts/ ./scripts/
 
 # Create directory for persistent config

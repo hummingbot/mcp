@@ -374,13 +374,13 @@ The error messages will include:
 - The exact URL being used
 - Your configured username (password is masked)
 - Specific suggestions on how to fix the issue
-- References to tools like `configure_api_servers` and `manage_local_api`
+- References to tools like `configure_api_servers`
 
 ### Common Solutions
 
 1. **API Not Running**:
-   - Use the `manage_local_api` tool to check status and start your local API
-   - Or verify your remote API server is running
+   - Ensure your Hummingbot API server is running
+   - Verify the API is accessible at the configured URL
 
 2. **Wrong Credentials**:
    - Use `configure_api_servers` tool to update server credentials
@@ -400,4 +400,4 @@ The MCP server will:
 - **Not retry** on authentication failures (401 errors) - it will immediately tell you the credentials are wrong
 - **Retry** on connection failures with helpful messages about what might be wrong
 - **Provide context** about whether you're running in Docker and suggest appropriate fixes
-- **Guide you** to the right tools (`manage_local_api`, `configure_api_servers`) to fix issues
+- **Guide you** to the right tools (`configure_api_servers`) to fix issues

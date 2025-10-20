@@ -1,4 +1,3 @@
-include docker-compose-api.yml
 recursive-include scripts *.sh
 include README.md
 include LICENSE
