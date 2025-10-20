@@ -951,6 +951,10 @@ async def manage_local_api(
 
     IMPORTANT: For production use, always specify custom credentials!
 
+    NOTE: On first setup, Docker images (hummingbot-api, postgres, emqx, hummingbot) will be
+    downloaded automatically if not present locally. This may take 5-10 minutes depending on
+    your internet connection. The tool will inform you about which images are being downloaded.
+
     Args:
         action: Action to perform ('status', 'setup', 'start', 'stop'). Leave empty to show status.
         interactive: If True, runs interactive bash setup with prompts (only for 'setup' action)
