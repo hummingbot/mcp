@@ -1,9 +1,0 @@
-services:
-  hummingbot-mcp:
-    build: .
-    image: hummingbot/hummingbot-mcp:latest
-    volumes:
-      - ~/.hummingbot_mcp:/root/.hummingbot_mcp
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
