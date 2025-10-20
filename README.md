@@ -64,12 +64,42 @@ An MCP (Model Context Protocol) server that enables Claude and Gemini CLI to int
    HUMMINGBOT_PASSWORD=admin
    ```
 
+   **Important**: When running the MCP server in Docker and connecting to a Hummingbot API on your host:
+   - **Linux**: Use `--network host` (see below) to allow the container to access `localhost:8000`
+   - **Mac/Windows**: Change `HUMMINGBOT_API_URL` to `http://host.docker.internal:8000`
+
 3. **Pull the Docker image**:
    ```bash
    docker pull hummingbot/hummingbot-mcp:latest
    ```
 
 4. **Configure in Claude Code or Gemini CLI**:
+
+   **For Linux (using --network host)**:
+   ```json
+   {
+     "mcpServers": {
+       "hummingbot-mcp": {
+         "type": "stdio",
+         "command": "docker",
+         "args": [
+           "run",
+           "--rm",
+           "-i",
+           "--network",
+           "host",
+           "--env-file",
+           "/path/to/mcp/.env",
+           "-v",
+           "$HOME/.hummingbot_mcp:/root/.hummingbot_mcp",
+           "hummingbot/hummingbot-mcp:latest"
+         ]
+       }
+     }
+   }
+   ```
+
+   **For Mac/Windows**:
    ```json
    {
      "mcpServers": {
@@ -82,13 +112,16 @@ An MCP (Model Context Protocol) server that enables Claude and Gemini CLI to int
            "-i",
            "--env-file",
            "/path/to/mcp/.env",
+           "-v",
+           "$HOME/.hummingbot_mcp:/root/.hummingbot_mcp",
            "hummingbot/hummingbot-mcp:latest"
          ]
        }
      }
    }
    ```
-   
+   (Remember to set `HUMMINGBOT_API_URL=http://host.docker.internal:8000` in your `.env` file)
+
    **Note**: Make sure to replace `/path/to/mcp` with the actual path to your MCP directory.
 
 ### Cloud Deployment with Docker Compose
@@ -328,8 +361,43 @@ uv run pytest
 
 ## Troubleshooting
 
-1. **Connection Issues**: Ensure the Hummingbot API server is running and accessible at the URL specified in your `.env` file.
+The MCP server now provides **comprehensive error messages** to help diagnose connection and authentication issues:
 
-2. **Authentication Errors**: Verify your username and password in the `.env` file match your Hummingbot API credentials.
+### Connection Errors
 
-3. **Docker Issues**: Make sure the `.env` file is in the same directory as your `docker-compose.yml` or specify the correct path in the Docker run command.
+If you see error messages like:
+- `❌ Cannot reach Hummingbot API at <url>` - The API server is not running or not accessible
+- `❌ Authentication failed when connecting to Hummingbot API` - Incorrect username or password
+- `❌ Failed to connect to Hummingbot API` - Generic connection failure
+
+The error messages will include:
+- The exact URL being used
+- Your configured username (password is masked)
+- Specific suggestions on how to fix the issue
+- References to tools like `configure_api_servers` and `manage_local_api`
+
+### Common Solutions
+
+1. **API Not Running**:
+   - Use the `manage_local_api` tool to check status and start your local API
+   - Or verify your remote API server is running
+
+2. **Wrong Credentials**:
+   - Use `configure_api_servers` tool to update server credentials
+   - Or check your `.env` file configuration
+
+3. **Wrong URL**:
+   - Use `configure_api_servers` tool to update the server URL
+   - For Docker on Mac/Windows, use `host.docker.internal` instead of `localhost`
+
+4. **Docker Network Issues**:
+   - On Linux, use `--network host` in your Docker configuration
+   - On Mac/Windows, use `host.docker.internal:8000` as the API URL
+
+### Error Prevention
+
+The MCP server will:
+- **Not retry** on authentication failures (401 errors) - it will immediately tell you the credentials are wrong
+- **Retry** on connection failures with helpful messages about what might be wrong
+- **Provide context** about whether you're running in Docker and suggest appropriate fixes
+- **Guide you** to the right tools (`manage_local_api`, `configure_api_servers`) to fix issues

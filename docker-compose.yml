@@ -1,13 +1,9 @@
 services:
   hummingbot-mcp:
     build: .
-    image: hummingbot/mcp-server:latest
+    image: hummingbot/hummingbot-mcp:latest
     volumes:
-      - hummingbot_mcp_config:/root/.hummingbot_mcp
+      - ~/.hummingbot_mcp:/root/.hummingbot_mcp
     stdin_open: true
     tty: true
     restart: unless-stopped
-
-volumes:
-  hummingbot_mcp_config:
-    driver: local
