@@ -43,7 +43,7 @@ class LocalAPIDeployment:
                 check=True,
             )
             return "hummingbot-api" in result.stdout
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, FileNotFoundError):
             return False
 
     def check_docker_images_exist(self) -> dict[str, bool]:
@@ -562,19 +562,108 @@ Status: ✅ All services are running and healthy"""
         except Exception as e:
             return False, f"Failed to stop API: {str(e)}"
 
-    async def status(self) -> dict:
+    async def test_api_connection(self, username: str = "admin", password: str = "admin") -> dict:
+        """
+        Test API connection and authentication
+
+        Args:
+            username: Username to test
+            password: Password to test
+
+        Returns:
+            Dictionary with connection status and details
+        """
+        import aiohttp
+        import base64
+
+        result = {
+            "api_reachable": False,
+            "auth_valid": False,
+            "error": None,
+        }
+
+        try:
+            # First check if API is reachable (unauthenticated endpoint)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "http://localhost:8000/",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if 200 <= response.status < 400:
+                        result["api_reachable"] = True
+
+                # Now test authenticated endpoint
+                credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+                headers = {"Authorization": f"Basic {credentials}"}
+
+                async with session.get(
+                    "http://localhost:8000/accounts/",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        result["auth_valid"] = True
+                    elif response.status == 401:
+                        result["error"] = "Invalid credentials"
+                    else:
+                        result["error"] = f"Unexpected status: {response.status}"
+
+        except aiohttp.ClientConnectorError:
+            result["error"] = "Cannot connect to API"
+        except asyncio.TimeoutError:
+            result["error"] = "Connection timeout"
+        except Exception as e:
+            result["error"] = str(e)
+
+        return result
+
+    async def status(self, test_connection: bool = True) -> dict:
         """
         Get deployment status
+
+        Args:
+            test_connection: Whether to test the API connection (default: True)
 
         Returns:
             Status dictionary
         """
-        return {
-            "deployed": self.is_deployed(),
-            "running": self.is_running(),
+        deployed = self.is_deployed()
+        running = self.is_running()
+
+        status = {
+            "deployed": deployed,
+            "running": running,
             "deployment_path": str(self.deployment_path),
-            "api_url": "http://localhost:8000" if self.is_running() else None,
+            "api_url": "http://localhost:8000" if running else None,
         }
+
+        # Always test connection if requested, even if containers aren't detected
+        # (API might be running but not managed by this tool)
+        if test_connection:
+            # Try to get credentials from .env file if deployed
+            username = "admin"
+            password = "admin"
+
+            env_file = self.deployment_path / ".env"
+            if env_file.exists():
+                try:
+                    with open(env_file) as f:
+                        for line in f:
+                            if line.startswith("USERNAME="):
+                                username = line.split("=", 1)[1].strip()
+                            elif line.startswith("PASSWORD="):
+                                password = line.split("=", 1)[1].strip()
+                except Exception:
+                    pass
+
+            connection_test = await self.test_api_connection(username, password)
+            status["connection_test"] = connection_test
+
+            # If API is reachable but containers not detected, it's running externally
+            if connection_test["api_reachable"] and not running:
+                status["running_externally"] = True
+
+        return status
 
 
 # Global instance

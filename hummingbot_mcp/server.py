@@ -185,6 +185,9 @@ async def get_portfolio_balances(
             return f"Portfolio Distribution: {result}"
         account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
         return f"Account State: {account_info}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get account state: {str(e)}")
@@ -217,8 +220,8 @@ async def place_order(
         can hold a long and short position at the same time.
         account_name: Account name (default: master_account)
     """
-    client = await hummingbot_client.get_client()
     try:
+        client = await hummingbot_client.get_client()
         if "$" in amount and price is None:
             prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pair)
             price = prices["prices"][trading_pair]
@@ -236,6 +239,9 @@ async def place_order(
             position_action=position_action,
         )
         return f"Order Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"place_order failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to place order: {str(e)}")
@@ -283,6 +289,9 @@ async def set_account_position_mode_and_leverage(
             )
             response += f"Leverage Set: {leverage_result}\n"
         return f"{response.strip()}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"set_account_position_mode_and_leverage failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to set position mode and leverage: {str(e)}")
@@ -325,6 +334,9 @@ async def get_orders(
             cursor=cursor,
         )
         return f"Order Management Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"manage_orders failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage orders: {str(e)}")
@@ -346,6 +358,9 @@ async def get_positions(
         result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
                                                     limit=limit)
         return f"Position Management Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage positions: {str(e)}")
@@ -365,6 +380,9 @@ async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
         client = await hummingbot_client.get_client()
         prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pairs)
         return f"Price results: {prices}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_prices failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get prices: {str(e)}")
@@ -404,6 +422,9 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
             connector_name=connector_name, trading_pair=trading_pair, interval=interval, max_records=max_records
         )
         return f"Candle results: {candles}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_candles failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get candles: {str(e)}")
@@ -427,6 +448,9 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
         funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
                                                                  trading_pair=trading_pair)
         return f"Funding Rate: {funding_rate}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_funding_rate failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get funding rate: {str(e)}")
@@ -479,6 +503,9 @@ async def get_order_book(
             else:
                 raise ValueError(f"Unsupported query type: {query_type}")
             return f"Order Book Query Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_market_data failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get market data: {str(e)}")
@@ -978,15 +1005,45 @@ async def manage_local_api(
             status = await local_api.status()
             result = "Local Hummingbot API Status:\n\n"
             result += f"Deployed: {'Yes' if status['deployed'] else 'No'}\n"
-            result += f"Running: {'Yes' if status['running'] else 'No'}\n"
-            result += f"Deployment Path: {status['deployment_path']}\n"
-            if status['api_url']:
-                result += f"API URL: {status['api_url']}\n"
-                result += f"API Docs: {status['api_url']}/docs\n"
 
-            if not status['deployed']:
+            # Check if running externally
+            if status.get('running_externally'):
+                result += f"Running: Yes (externally managed)\n"
+            else:
+                result += f"Running: {'Yes' if status['running'] else 'No'}\n"
+
+            result += f"Deployment Path: {status['deployment_path']}\n"
+
+            # Show connection test results if available
+            if 'connection_test' in status:
+                conn = status['connection_test']
+                result += f"\nConnection Test:\n"
+                result += f"  API Reachable: {'Yes' if conn['api_reachable'] else 'No'}\n"
+                result += f"  Authentication: {'✅ Valid' if conn['auth_valid'] else '❌ Invalid'}\n"
+
+                if conn['api_reachable']:
+                    result += f"  API URL: http://localhost:8000\n"
+                    result += f"  API Docs: http://localhost:8000/docs\n"
+
+                if conn['error']:
+                    result += f"  Error: {conn['error']}\n"
+
+                    if conn['error'] == "Invalid credentials":
+                        result += "\n⚠️  WARNING: API is running but credentials don't match!\n"
+                        if status['deployed']:
+                            result += "   The API server is using different credentials than what's in the .env file.\n"
+                        else:
+                            result += "   The API is running but not deployed by this tool (no .env file found).\n"
+                        result += "\n💡 Solutions:\n"
+                        result += "   1. Update the MCP client configuration to use the correct credentials\n"
+                        result += "      Use configure_api_servers tool to update the credentials\n"
+                        result += "   2. Or stop the external API and redeploy with this tool:\n"
+                        result += "      - Stop the external API\n"
+                        result += "      - manage_local_api(action='setup', username='...', password='...')\n"
+
+            if not status['deployed'] and not status.get('running_externally'):
                 result += "\n💡 Tip: Use action='setup' to deploy the local API"
-            elif not status['running']:
+            elif not status['running'] and not status.get('running_externally'):
                 result += "\n💡 Tip: Use action='start' to start the API"
 
             return result
