@@ -76,7 +76,7 @@ class HummingbotClient:
                 f"  - The API URL is incorrect\n"
                 f"  - Network/firewall issues\n\n"
                 f"💡 Solutions:\n"
-                f"  1. Check if the API is running (use 'manage_local_api' tool if using localhost)\n"
+                f"  1. Ensure the Hummingbot API is running and accessible\n"
                 f"  2. Verify the API URL is correct: {settings.api_url}\n"
                 f"  3. Use 'configure_api_servers' tool to update server configuration\n\n"
                 f"Original error: {last_error}"
@@ -88,7 +88,7 @@ class HummingbotClient:
                 f"💡 Solutions:\n"
                 f"  1. Check if the API is running and accessible\n"
                 f"  2. Verify your credentials are correct\n"
-                f"  3. Use 'configure_api_servers' or 'manage_local_api' tools for setup\n\n"
+                f"  3. Use 'configure_api_servers' tool for setup\n\n"
                 f"Original error: {last_error}"
             )
 

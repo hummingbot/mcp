@@ -12,7 +12,6 @@ from mcp.server.fastmcp import FastMCP
 from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
 from hummingbot_mcp.hummingbot_client import hummingbot_client
-from hummingbot_mcp.local_deployment import local_api
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools.account import SetupConnectorRequest
 
@@ -956,161 +955,6 @@ async def stop_bot_or_controllers(
     return await manage_bot_execution(bot_name, action, controller_names)
 
 
-@mcp.tool()
-async def manage_local_api(
-        action: Literal["status", "setup", "start", "stop"] | None = None,
-        interactive: bool = False,
-        username: str = "admin",
-        password: str = "admin",
-        config_password: str = "admin",
-) -> str:
-    """
-    Manage local Hummingbot API deployment.
-
-    This tool helps you deploy and manage a local instance of the Hummingbot API using Docker.
-    The API will be deployed to ~/.hummingbot_api by default.
-
-    Progressive flow:
-    1. No parameters → Show current status
-    2. action="setup" → Deploy local API with custom or default credentials
-    3. action="start" → Start the API containers
-    4. action="stop" → Stop the API containers
-
-    IMPORTANT: For production use, always specify custom credentials!
-
-    NOTE: On first setup, Docker images (hummingbot-api, postgres, emqx, hummingbot) will be
-    downloaded automatically if not present locally. This may take 5-10 minutes depending on
-    your internet connection. The tool will inform you about which images are being downloaded.
-
-    Args:
-        action: Action to perform ('status', 'setup', 'start', 'stop'). Leave empty to show status.
-        interactive: If True, runs interactive bash setup with prompts (only for 'setup' action)
-        username: API username for HTTP Basic Auth (default: 'admin' - CHANGE THIS FOR PRODUCTION!)
-        password: API password for HTTP Basic Auth (default: 'admin' - CHANGE THIS FOR PRODUCTION!)
-        config_password: Password to encrypt bot credentials (default: 'admin' - CHANGE THIS FOR PRODUCTION!)
-
-    Examples:
-        # Deploy with default credentials (development only)
-        manage_local_api(action="setup")
-
-        # Deploy with custom credentials (recommended)
-        manage_local_api(action="setup", username="myuser", password="StrongPass123", config_password="BotPass456")
-
-        # Interactive setup (prompts for all values)
-        manage_local_api(action="setup", interactive=True)
-    """
-    try:
-        # No action = show status
-        if action is None or action == "status":
-            status = await local_api.status()
-            result = "Local Hummingbot API Status:\n\n"
-            result += f"Deployed: {'Yes' if status['deployed'] else 'No'}\n"
-
-            # Check if running externally
-            if status.get('running_externally'):
-                result += f"Running: Yes (externally managed)\n"
-            else:
-                result += f"Running: {'Yes' if status['running'] else 'No'}\n"
-
-            result += f"Deployment Path: {status['deployment_path']}\n"
-
-            # Show connection test results if available
-            if 'connection_test' in status:
-                conn = status['connection_test']
-                result += f"\nConnection Test:\n"
-                result += f"  API Reachable: {'Yes' if conn['api_reachable'] else 'No'}\n"
-                result += f"  Authentication: {'✅ Valid' if conn['auth_valid'] else '❌ Invalid'}\n"
-
-                if conn['api_reachable']:
-                    result += f"  API URL: http://localhost:8000\n"
-                    result += f"  API Docs: http://localhost:8000/docs\n"
-
-                if conn['error']:
-                    result += f"  Error: {conn['error']}\n"
-
-                    if conn['error'] == "Invalid credentials":
-                        result += "\n⚠️  WARNING: API is running but credentials don't match!\n"
-                        if status['deployed']:
-                            result += "   The API server is using different credentials than what's in the .env file.\n"
-                        else:
-                            result += "   The API is running but not deployed by this tool (no .env file found).\n"
-                        result += "\n💡 Solutions:\n"
-                        result += "   1. Update the MCP client configuration to use the correct credentials\n"
-                        result += "      Use configure_api_servers tool to update the credentials\n"
-                        result += "   2. Or stop the external API and redeploy with this tool:\n"
-                        result += "      - Stop the external API\n"
-                        result += "      - manage_local_api(action='setup', username='...', password='...')\n"
-
-            if not status['deployed'] and not status.get('running_externally'):
-                result += "\n💡 Tip: Use action='setup' to deploy the local API"
-            elif not status['running'] and not status.get('running_externally'):
-                result += "\n💡 Tip: Use action='start' to start the API"
-
-            return result
-
-        # Setup action
-        elif action == "setup":
-            # Warn if using default credentials
-            using_defaults = (username == "admin" and password == "admin" and config_password == "admin")
-
-            if interactive:
-                success, message = await local_api.setup_interactive()
-            else:
-                if using_defaults:
-                    logger.warning("⚠️  Deploying with default credentials! This is only suitable for development/testing.")
-                    logger.warning("💡 For production, use: manage_local_api(action='setup', username='...', password='...', config_password='...')")
-
-                success, message = await local_api.setup_non_interactive(
-                    username=username,
-                    password=password,
-                    config_password=config_password
-                )
-
-            if success:
-                # Add security warning to success message if using defaults
-                if using_defaults and not interactive:
-                    message += "\n\n⚠️  WARNING: Using default credentials (admin/admin)"
-                    message += "\n   This is ONLY suitable for local development/testing!"
-                    message += "\n   For production, redeploy with custom credentials:"
-                    message += "\n   manage_local_api(action='setup', username='myuser', password='StrongPass123', config_password='BotPass456')"
-
-                # Automatically add as a server
-                try:
-                    api_servers_config.add_server(
-                        name="localhost",
-                        url="http://localhost:8000",
-                        username=username,
-                        password=password
-                    )
-                    message += "\n\n✅ Server 'localhost' added to your configuration."
-                    message += "\n💡 Use configure_api_servers(action='set_default', name='localhost') to switch to it."
-                except ValueError as e:
-                    # Server might already exist
-                    if "already exists" in str(e):
-                        message += "\n\nℹ️ Server 'localhost' already exists in your configuration."
-                    else:
-                        raise
-
-            return message
-
-        # Start action
-        elif action == "start":
-            success, message = await local_api.start()
-            return message
-
-        # Stop action
-        elif action == "stop":
-            success, message = await local_api.stop()
-            return message
-
-        else:
-            return f"Error: Invalid action '{action}'. Use 'status', 'setup', 'start', or 'stop'"
-
-    except Exception as e:
-        logger.error(f"manage_local_api failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage local API: {str(e)}")
-
-
 async def main():
     """Run the MCP server"""
     # Setup logging once at application start
@@ -1126,25 +970,7 @@ async def main():
     except Exception as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         logger.error("Please ensure Hummingbot API is running and credentials are correct.")
-
-        # Check if local API is available but not running
-        local_status = await local_api.status()
-
-        if settings.api_url == "http://localhost:8000":
-            # User is trying to connect to localhost
-            if local_status['deployed'] and not local_status['running']:
-                logger.warning("⚠️  Local API is deployed but not running.")
-                logger.warning("💡 Use the 'manage_local_api' tool with action='start' to start it.")
-            elif not local_status['deployed']:
-                logger.warning("⚠️  No local Hummingbot API detected.")
-                logger.warning("💡 Use the 'manage_local_api' tool with action='setup' to deploy one automatically.")
-                logger.warning(f"   The API will be deployed to: {local_status['deployment_path']}")
-        else:
-            logger.warning(f"⚠️  Cannot reach API at {settings.api_url}")
-            logger.warning("💡 Options:")
-            logger.warning("   1. Ensure the remote API is running and accessible")
-            logger.warning("   2. Deploy a local API using 'manage_local_api' tool with action='setup'")
-
+        logger.error("💡 Use 'configure_api_servers' tool to manage API server connections")
         # Don't exit - let MCP server start anyway and handle errors per request
 
     # Run the server with FastMCP
