@@ -57,7 +57,7 @@ class APIServersConfig:
             # Create default server from env vars or defaults
             default_server = APIServer(
                 name="default",
-                url=os.getenv("HUMMINGBOT_API_URL", "http://localhost:8000"),
+                url=os.getenv("HUMMINGBOT_API_URL", "http://docker.host.internal:8000"),
                 username=os.getenv("HUMMINGBOT_USERNAME", "admin"),
                 password=os.getenv("HUMMINGBOT_PASSWORD", "admin"),
                 is_default=True,
