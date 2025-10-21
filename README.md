@@ -283,11 +283,28 @@ On first run, the server creates a default server from environment variables (or
 # List all configured servers
 configure_api_servers()
 
-# Add a new server
+# Add a new server using full URL
 configure_api_servers(
     action="add",
     name="production",
     url="http://prod-server:8000",
+    username="admin",
+    password="secure_password"
+)
+
+# Add a server using just port (defaults to localhost)
+configure_api_servers(
+    action="add",
+    name="local_8001",
+    port=8001,
+    username="admin",
+    password="secure_password"
+)
+
+# Add a server using default port 8000
+configure_api_servers(
+    action="add",
+    name="local_default",
     username="admin",
     password="secure_password"
 )
