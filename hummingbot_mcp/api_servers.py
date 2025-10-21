@@ -105,10 +105,10 @@ class APIServersConfig:
 
     def add_server(self, name: str, url: str, username: str = "admin", password: str = "admin") -> str:
         """
-        Add a new server
+        Add or update a server
 
         Args:
-            name: Unique name for the server
+            name: Server name
             url: API URL
             username: API username
             password: API password
@@ -116,15 +116,14 @@ class APIServersConfig:
         Returns:
             Success message
         """
-        if name in self._servers:
-            raise ValueError(f"Server '{name}' already exists. Use a different name or set_default to switch.")
+        is_update = name in self._servers
+        was_default = self._servers[name].is_default if is_update else False
 
-        server = APIServer(name=name, url=url, username=username, password=password, is_default=False)
-
+        server = APIServer(name=name, url=url, username=username, password=password, is_default=was_default)
         self._servers[name] = server
         self._save()
 
-        return f"Server '{name}' added successfully"
+        return f"Server '{name}' {'updated' if is_update else 'added'} successfully"
 
     def set_default(self, name: str) -> str:
         """
@@ -162,6 +161,45 @@ class APIServersConfig:
 
         # This should never happen due to initialization
         raise ValueError("No servers configured")
+
+    def modify_server(
+        self, name: str, url: str | None = None, username: str | None = None, password: str | None = None
+    ) -> str:
+        """
+        Modify an existing server configuration
+
+        Args:
+            name: Server name to modify
+            url: New API URL (optional)
+            username: New API username (optional)
+            password: New API password (optional)
+
+        Returns:
+            Success message
+        """
+        if name not in self._servers:
+            available = list(self._servers.keys())
+            raise ValueError(f"Server '{name}' not found. Available servers: {available}")
+
+        server = self._servers[name]
+        modified_fields = []
+
+        if url is not None:
+            server.url = url
+            modified_fields.append("url")
+        if username is not None:
+            server.username = username
+            modified_fields.append("username")
+        if password is not None:
+            server.password = password
+            modified_fields.append("password")
+
+        if not modified_fields:
+            return f"No changes specified for server '{name}'"
+
+        self._save()
+        fields_str = ", ".join(modified_fields)
+        return f"Server '{name}' modified successfully ({fields_str} updated)"
 
     def remove_server(self, name: str) -> str:
         """
@@ -207,9 +245,8 @@ class APIServersConfig:
         try:
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                # Try to hit the health endpoint or root
-                health_url = f"{server.url.rstrip('/')}/health"
-                async with session.get(health_url) as response:
+                # Try root endpoint
+                async with session.get(server.url.rstrip('/')) as response:
                     if response.status == 200:
                         return True, f"Server '{server.name}' is healthy"
                     else:
