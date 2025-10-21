@@ -4,6 +4,8 @@ Main MCP server for Hummingbot API integration
 
 import asyncio
 import logging
+import os
+import platform
 import sys
 from typing import Any, Literal
 
@@ -70,7 +72,8 @@ async def setup_connector(
 async def configure_api_servers(
         action: str | None = None,
         name: str | None = None,
-        url: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
         username: str | None = None,
         password: str | None = None,
 ) -> str:
@@ -78,16 +81,18 @@ async def configure_api_servers(
 
     This tool helps you manage multiple Hummingbot API servers with a simple flow:
     1. No parameters → List all configured servers
-    2. action="add" + name + url (+ optional username/password) → Add a new server
-    3. action="set_default" + name → Set a server as default (reconnects client)
-    4. action="remove" + name → Remove a server
+    2. action="add" + name + (optional host/port/username/password) → Add a new server
+    3. action="modify" + name + (host/port/username/password) → Modify existing server (partial updates supported)
+    4. action="set_default" + name → Set a server as default (reconnects client)
+    5. action="remove" + name → Remove a server
 
     Args:
-        action: Action to perform ('add', 'set_default', 'remove'). Leave empty to list servers.
+        action: Action to perform ('add', 'modify', 'set_default', 'remove'). Leave empty to list servers.
         name: Server name (required for all actions)
-        url: API URL (required for 'add')
-        username: API username (optional for 'add', defaults to 'admin')
-        password: API password (optional for 'add', defaults to 'admin')
+        host: API host (optional, defaults to 'localhost' for 'add'. Examples: 'localhost', 'host.docker.internal', '72.212.424.42')
+        port: API port (optional, defaults to 8000 for 'add')
+        username: API username (optional for 'add', defaults to 'admin'; optional for 'modify')
+        password: API password (optional for 'add', defaults to 'admin'; optional for 'modify')
     """
     try:
         # No action = list servers
@@ -107,8 +112,13 @@ async def configure_api_servers(
 
         # Add server
         if action == "add":
-            if url is None:
-                return "Error: 'url' parameter is required for 'add' action"
+            # Apply defaults and construct URL from host and port
+            if host is None:
+                host = "localhost"
+            if port is None:
+                port = 8000
+
+            url = f"http://{host}:{port}"
 
             result = api_servers_config.add_server(
                 name=name,
@@ -116,40 +126,93 @@ async def configure_api_servers(
                 username=username or "admin",
                 password=password or "admin",
             )
+
+            # Add Docker networking warning for localhost URLs
+            if host == "localhost" and os.getenv("DOCKER_CONTAINER") == "true":
+                system = platform.system()
+                if system in ["Darwin", "Windows"]:
+                    result += (
+                        "\n\n⚠️  Docker Networking Notice:\n"
+                        f"You're running on {system} and using 'localhost' as the host.\n"
+                        "Docker containers on Mac/Windows cannot access 'localhost' on the host.\n"
+                        f"If connection fails, use 'host.docker.internal' instead:\n"
+                        f"  configure_api_servers(action='add', name='{name}', "
+                        f"host='host.docker.internal', port={port}, ...)"
+                    )
+
+            return result
+
+        # Modify server
+        elif action == "modify":
+            # Construct URL from host and port if either is provided
+            url = None
+            if host is not None or port is not None:
+                # Get current server config to use existing values as defaults
+                servers = api_servers_config.list_servers()
+                if name not in servers:
+                    return f"Error: Server '{name}' not found"
+
+                current_server = servers[name]
+                current_url = current_server["url"]
+
+                # Parse current URL to extract host and port
+                from urllib.parse import urlparse
+                parsed = urlparse(current_url)
+                current_host = parsed.hostname or "localhost"
+                current_port = parsed.port or 8000
+
+                # Use provided values or fall back to current values
+                final_host = host if host is not None else current_host
+                final_port = port if port is not None else current_port
+
+                url = f"http://{final_host}:{final_port}"
+
+            result = api_servers_config.modify_server(name=name, url=url, username=username, password=password)
+
+            # Check if we modified the default server and need to reconnect
+            default_server = api_servers_config.get_default_server()
+            if default_server.name == name:
+                settings.reload_from_default_server()
+                await hummingbot_client.close()
+                try:
+                    await hummingbot_client.initialize(force=True)
+                    return f"{result}. Client reconnected successfully."
+                except Exception as e:
+                    return f"{result}. Warning: Could not connect to server - {str(e)}"
+
             return result
 
         # Set default server
         elif action == "set_default":
-            # Health check before setting as default
-            is_healthy, health_msg = await api_servers_config.health_check(name)
-            if not is_healthy:
-                return f"Cannot set '{name}' as default: {health_msg}\n\nPlease ensure the server is running before setting it as default."
-
             result = api_servers_config.set_default(name)
 
             # Reload settings and reconnect client
             settings.reload_from_default_server()
             await hummingbot_client.close()
-            await hummingbot_client.initialize()
-
-            return f"{result}. Client reconnected to new default server."
+            try:
+                await hummingbot_client.initialize(force=True)
+                return f"{result}. Client reconnected successfully."
+            except Exception as e:
+                return f"{result}. Warning: Could not connect to server - {str(e)}"
 
         # Remove server
         elif action == "remove":
             result = api_servers_config.remove_server(name)
 
-            # If we removed the default, reload settings
-            default_server = api_servers_config.get_default_server()
-            if default_server.name != name:
+            # Reload settings and reconnect if there are remaining servers
+            try:
                 settings.reload_from_default_server()
                 await hummingbot_client.close()
-                await hummingbot_client.initialize()
-                result += f" New default server is '{default_server.name}'. Client reconnected."
+                await hummingbot_client.initialize(force=True)
+                default_server = api_servers_config.get_default_server()
+                result += f" New default is '{default_server.name}'."
+            except Exception:
+                pass
 
             return result
 
         else:
-            return f"Error: Invalid action '{action}'. Use 'add', 'set_default', or 'remove'"
+            return f"Error: Invalid action '{action}'. Use 'add', 'modify', 'set_default', or 'remove'"
 
     except Exception as e:
         logger.error(f"configure_api_servers failed: {str(e)}", exc_info=True)
@@ -959,25 +1022,17 @@ async def main():
     """Run the MCP server"""
     # Setup logging once at application start
     logger.info("Starting Hummingbot MCP Server")
-    logger.info(f"API URL: {settings.api_url}")
+    logger.info(f"Configured API URL: {settings.api_url}")
     logger.info(f"Default Account: {settings.default_account}")
-
-    # Test API connection
-    try:
-        client = await hummingbot_client.initialize()
-        accounts = await client.accounts.list_accounts()
-        logger.info(f"Successfully connected to Hummingbot API. Found {len(accounts)} accounts.")
-    except Exception as e:
-        logger.error(f"Failed to connect to Hummingbot API: {e}")
-        logger.error("Please ensure Hummingbot API is running and credentials are correct.")
-        logger.error("💡 Use 'configure_api_servers' tool to manage API server connections")
-        # Don't exit - let MCP server start anyway and handle errors per request
+    logger.info("Server will connect to API on first use (lazy initialization)")
+    logger.info("💡 Use 'configure_api_servers' tool to manage API server connections")
 
     # Run the server with FastMCP
+    # Connection to API will happen lazily on first tool use
     try:
         await mcp.run_stdio_async()
     finally:
-        # Clean up client connection
+        # Clean up client connection if it was initialized
         await hummingbot_client.close()
 
 
