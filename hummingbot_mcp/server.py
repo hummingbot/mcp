@@ -4,11 +4,14 @@ Main MCP server for Hummingbot API integration
 
 import asyncio
 import logging
+import os
+import platform
 import sys
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
+from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
 from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
@@ -66,6 +69,157 @@ async def setup_connector(
 
 
 @mcp.tool()
+async def configure_api_servers(
+        action: str | None = None,
+        name: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        username: str | None = None,
+        password: str | None = None,
+) -> str:
+    """Configure API servers using progressive disclosure.
+
+    This tool helps you manage multiple Hummingbot API servers with a simple flow:
+    1. No parameters → List all configured servers
+    2. action="add" + name + (optional host/port/username/password) → Add a new server
+    3. action="modify" + name + (host/port/username/password) → Modify existing server (partial updates supported)
+    4. action="set_default" + name → Set a server as default (reconnects client)
+    5. action="remove" + name → Remove a server
+
+    Args:
+        action: Action to perform ('add', 'modify', 'set_default', 'remove'). Leave empty to list servers.
+        name: Server name (required for all actions)
+        host: API host (optional, defaults to 'localhost' for 'add'. Examples: 'localhost', 'host.docker.internal', '72.212.424.42')
+        port: API port (optional, defaults to 8000 for 'add')
+        username: API username (optional for 'add', defaults to 'admin'; optional for 'modify')
+        password: API password (optional for 'add', defaults to 'admin'; optional for 'modify')
+    """
+    try:
+        # No action = list servers
+        if action is None:
+            servers = api_servers_config.list_servers()
+            result = "Configured API Servers:\n\n"
+            for server_name, server_info in servers.items():
+                default_marker = " (DEFAULT)" if server_info["is_default"] else ""
+                result += f"- {server_name}{default_marker}\n"
+                result += f"  URL: {server_info['url']}\n"
+                result += f"  Username: {server_info['username']}\n\n"
+            return result
+
+        # Validate name for all actions
+        if name is None:
+            return "Error: 'name' parameter is required for all actions"
+
+        # Add server
+        if action == "add":
+            # Apply defaults and construct URL from host and port
+            if host is None:
+                host = "localhost"
+            if port is None:
+                port = 8000
+
+            url = f"http://{host}:{port}"
+
+            result = api_servers_config.add_server(
+                name=name,
+                url=url,
+                username=username or "admin",
+                password=password or "admin",
+            )
+
+            # Add Docker networking warning for localhost URLs
+            if host == "localhost" and os.getenv("DOCKER_CONTAINER") == "true":
+                system = platform.system()
+                if system in ["Darwin", "Windows"]:
+                    result += (
+                        "\n\n⚠️  Docker Networking Notice:\n"
+                        f"You're running on {system} and using 'localhost' as the host.\n"
+                        "Docker containers on Mac/Windows cannot access 'localhost' on the host.\n"
+                        f"If connection fails, use 'host.docker.internal' instead:\n"
+                        f"  configure_api_servers(action='add', name='{name}', "
+                        f"host='host.docker.internal', port={port}, ...)"
+                    )
+
+            return result
+
+        # Modify server
+        elif action == "modify":
+            # Construct URL from host and port if either is provided
+            url = None
+            if host is not None or port is not None:
+                # Get current server config to use existing values as defaults
+                servers = api_servers_config.list_servers()
+                if name not in servers:
+                    return f"Error: Server '{name}' not found"
+
+                current_server = servers[name]
+                current_url = current_server["url"]
+
+                # Parse current URL to extract host and port
+                from urllib.parse import urlparse
+                parsed = urlparse(current_url)
+                current_host = parsed.hostname or "localhost"
+                current_port = parsed.port or 8000
+
+                # Use provided values or fall back to current values
+                final_host = host if host is not None else current_host
+                final_port = port if port is not None else current_port
+
+                url = f"http://{final_host}:{final_port}"
+
+            result = api_servers_config.modify_server(name=name, url=url, username=username, password=password)
+
+            # Check if we modified the default server and need to reconnect
+            default_server = api_servers_config.get_default_server()
+            if default_server.name == name:
+                settings.reload_from_default_server()
+                await hummingbot_client.close()
+                try:
+                    await hummingbot_client.initialize(force=True)
+                    return f"{result}. Client reconnected successfully."
+                except Exception as e:
+                    return f"{result}. Warning: Could not connect to server - {str(e)}"
+
+            return result
+
+        # Set default server
+        elif action == "set_default":
+            result = api_servers_config.set_default(name)
+
+            # Reload settings and reconnect client
+            settings.reload_from_default_server()
+            await hummingbot_client.close()
+            try:
+                await hummingbot_client.initialize(force=True)
+                return f"{result}. Client reconnected successfully."
+            except Exception as e:
+                return f"{result}. Warning: Could not connect to server - {str(e)}"
+
+        # Remove server
+        elif action == "remove":
+            result = api_servers_config.remove_server(name)
+
+            # Reload settings and reconnect if there are remaining servers
+            try:
+                settings.reload_from_default_server()
+                await hummingbot_client.close()
+                await hummingbot_client.initialize(force=True)
+                default_server = api_servers_config.get_default_server()
+                result += f" New default is '{default_server.name}'."
+            except Exception:
+                pass
+
+            return result
+
+        else:
+            return f"Error: Invalid action '{action}'. Use 'add', 'modify', 'set_default', or 'remove'"
+
+    except Exception as e:
+        logger.error(f"configure_api_servers failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to configure API servers: {str(e)}")
+
+
+@mcp.tool()
 async def get_portfolio_balances(
         account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
 ) -> str:
@@ -93,6 +247,9 @@ async def get_portfolio_balances(
             return f"Portfolio Distribution: {result}"
         account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
         return f"Account State: {account_info}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get account state: {str(e)}")
@@ -125,8 +282,8 @@ async def place_order(
         can hold a long and short position at the same time.
         account_name: Account name (default: master_account)
     """
-    client = await hummingbot_client.get_client()
     try:
+        client = await hummingbot_client.get_client()
         if "$" in amount and price is None:
             prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pair)
             price = prices["prices"][trading_pair]
@@ -144,6 +301,9 @@ async def place_order(
             position_action=position_action,
         )
         return f"Order Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"place_order failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to place order: {str(e)}")
@@ -191,6 +351,9 @@ async def set_account_position_mode_and_leverage(
             )
             response += f"Leverage Set: {leverage_result}\n"
         return f"{response.strip()}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"set_account_position_mode_and_leverage failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to set position mode and leverage: {str(e)}")
@@ -233,6 +396,9 @@ async def get_orders(
             cursor=cursor,
         )
         return f"Order Management Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"manage_orders failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage orders: {str(e)}")
@@ -254,6 +420,9 @@ async def get_positions(
         result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
                                                     limit=limit)
         return f"Position Management Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage positions: {str(e)}")
@@ -273,6 +442,9 @@ async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
         client = await hummingbot_client.get_client()
         prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pairs)
         return f"Price results: {prices}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_prices failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get prices: {str(e)}")
@@ -312,6 +484,9 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
             connector_name=connector_name, trading_pair=trading_pair, interval=interval, max_records=max_records
         )
         return f"Candle results: {candles}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_candles failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get candles: {str(e)}")
@@ -335,6 +510,9 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
         funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
                                                                  trading_pair=trading_pair)
         return f"Funding Rate: {funding_rate}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_funding_rate failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get funding rate: {str(e)}")
@@ -387,6 +565,9 @@ async def get_order_book(
             else:
                 raise ValueError(f"Unsupported query type: {query_type}")
             return f"Order Book Query Result: {result}"
+    except HBConnectionError as e:
+        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
     except Exception as e:
         logger.error(f"get_market_data failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get market data: {str(e)}")
@@ -401,9 +582,9 @@ async def explore_controllers(
 ) -> str:
     """
     Explore and understand controllers and their configs.
-    
+
     Use this tool to discover what's available and understand how things work.
-    
+
     Progressive flow:
     1. action="list" → List all controllers and their configs
     2. action="list" + controller_type → List controllers of that type with config counts
@@ -411,18 +592,18 @@ async def explore_controllers(
     4. action="describe" + config_name → Show specific config details + which controller it uses
 
     Common Enum Values for Controller Configs:
-    
+
     Position Mode (position_mode):
     - "HEDGE" - Allows holding both long and short positions simultaneously
     - "ONEWAY" - Allows only one direction position at a time
     - Note: Use as string value, e.g., position_mode: "HEDGE"
-    
+
     Trade Side (side):
     - 1 or "BUY" - For long/buy positions
-    - 2 or "SELL" - For short/sell positions  
+    - 2 or "SELL" - For short/sell positions
     - 3 - Other trade types
     - Note: Numeric values are required for controller configs
-    
+
     Order Type (order_type, open_order_type, take_profit_order_type, etc.):
     - 1 or "MARKET" - Market order
     - 2 or "LIMIT" - Limit order
@@ -482,7 +663,7 @@ async def explore_controllers(
             return result
         else:
             return "Invalid action. Use 'list' or 'describe', or omit for overview."
-            
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -508,11 +689,11 @@ async def modify_controllers(
     """
     Create, update, or delete controllers and their configurations. If bot name is provided, it can only modify the config
     in the bot deployed with that name.
-    
+
     IMPORTANT: When creating a config without specifying config_data details, you MUST first use the explore_controllers tool
     with action="describe" and the controller_name to understand what parameters are required. The config_data must include
     ALL relevant parameters for the controller to function properly.
-    
+
     Controllers = are essentially strategies that can be run in Hummingbot.
     Configs = are the parameters that the controller uses to run.
 
@@ -521,12 +702,12 @@ async def modify_controllers(
         target: "controller" (template) or "config" (instance)
         confirm_override: Required True if overwriting existing
         config_data: For config creation, MUST contain all required controller parameters. Use explore_controllers first!
-        
+
     Workflow for creating a config:
     1. Use explore_controllers(action="describe", controller_name="<name>") to see required parameters
     2. Create config_data dict with ALL required parameters from the controller template
     3. Call modify_controllers with the complete config_data
-        
+
     Examples:
     - Create new controller: modify_controllers("upsert", "controller", controller_type="market_making", ...)
     - Create config: modify_controllers("upsert", "config", config_name="pmm_btc", config_data={...})
@@ -535,33 +716,33 @@ async def modify_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-        
+
         if target == "controller":
             if action == "upsert":
                 if not controller_type or not controller_name or not controller_code:
                     raise ValueError("controller_type, controller_name, and controller_code are required for controller upsert")
-                
+
                 # Check if controller exists
                 controllers = await client.controllers.list_controllers()
                 exists = controller_name in controllers.get(controller_type, [])
-                
+
                 if exists and not confirm_override:
                     controller_code = await client.controllers.get_controller(controller_type, controller_name)
                     return (f"Controller '{controller_name}' already exists and this is the current code: {controller_code}. "
                             f"Set confirm_override=True to update it.")
-                
+
                 result = await client.controllers.create_or_update_controller(
                     controller_type, controller_name, controller_code
                 )
                 return f"Controller {'updated' if exists else 'created'}: {result}"
-                
+
             elif action == "delete":
                 if not controller_type or not controller_name:
                     raise ValueError("controller_type and controller_name are required for controller delete")
-                    
+
                 result = await client.controllers.delete_controller(controller_type, controller_name)
                 return f"Controller deleted: {result}"
-                
+
         elif target == "config":
             if action == "upsert":
                 if not config_name or not config_data:
@@ -570,7 +751,7 @@ async def modify_controllers(
                 # Extract controller_type and controller_name from config_data
                 config_controller_type = config_data.get("controller_type")
                 config_controller_name = config_data.get("controller_name")
-                
+
                 if not config_controller_type or not config_controller_name:
                     raise ValueError("config_data must include 'controller_type' and 'controller_name'")
 
@@ -585,13 +766,13 @@ async def modify_controllers(
                             return (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
                                     "Set confirm_override=True to update it.")
                         else:
-                            update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                            update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
                             return f"Config created in bot '{bot_name}': {update_op}"
                     else:
                         # Ensure config_data has the correct id
                         if "id" not in config_data or config_data["id"] != config_name:
                             config_data["id"] = config_name
-                        update_op = await client.controllers.create_or_update_bot_controller_config(config_name, config_data)
+                        update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
                         return f"Config updated in bot '{bot_name}': {update_op}"
                 else:
                     # Ensure config_data has the correct id
@@ -608,17 +789,17 @@ async def modify_controllers(
 
                     result = await client.controllers.create_or_update_controller_config(config_name, config_data)
                     return f"Config {'updated' if exists else 'created'}: {result}"
-                
+
             elif action == "delete":
                 if not config_name:
                     raise ValueError("config_name is required for config delete")
-                    
+
                 result = await client.controllers.delete_controller_config(config_name)
                 await client.bot_orchestration.deploy_v2_controllers()
                 return f"Config deleted: {result}"
         else:
             raise ValueError("Invalid target. Must be 'controller' or 'config'.")
-            
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -668,10 +849,23 @@ async def deploy_bot_with_controllers(
 async def get_active_bots_status():
     """
     Get the status of all active bots. Including the unrealized PnL, realized PnL, volume traded, latest logs, etc.
+    Note: Both error logs and general logs are limited to the last 5 entries. Use get_bot_logs for more detailed log searching.
     """
     try:
         client = await hummingbot_client.get_client()
         active_bots = await client.bot_orchestration.get_active_bots_status()
+
+        # Limit logs to last 5 entries for each bot to reduce output size
+        if isinstance(active_bots, dict) and "data" in active_bots:
+            for bot_name, bot_data in active_bots["data"].items():
+                if isinstance(bot_data, dict):
+                    # Keep only the last 5 error logs
+                    if "error_logs" in bot_data:
+                        bot_data["error_logs"] = bot_data["error_logs"][-5:]
+                    # Keep only the last 5 general logs
+                    if "general_logs" in bot_data:
+                        bot_data["general_logs"] = bot_data["general_logs"][-5:]
+
         return f"Active Bots Status: {active_bots}"
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -680,56 +874,165 @@ async def get_active_bots_status():
 
 
 @mcp.tool()
-async def stop_bot_or_controllers(
+async def get_bot_logs(
         bot_name: str,
-        controller_names: Optional[list[str]] = None,
-):
+        log_type: Literal["error", "general", "all"] = "all",
+        limit: int = 50,
+        search_term: str | None = None,
+) -> str:
     """
-    Stop and archive a bot forever or stop the execution of a controller of a runnning bot. If the controllers to stop
-    are not specified, it will stop the bot execution and archive it forever, if they are specified, will only stop
-    the execution of those controllers and the bot will still be running with the rest of the controllers.
+    Get detailed logs for a specific bot with filtering options.
+
     Args:
-        bot_name: Name of the bot to stop
-        controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
+        bot_name: Name of the bot to get logs for
+        log_type: Type of logs to retrieve ('error', 'general', or 'all')
+        limit: Maximum number of log entries to return (default: 50, max: 1000)
+        search_term: Optional search term to filter logs by message content
     """
     try:
         client = await hummingbot_client.get_client()
-        if controller_names is None or len(controller_names) == 0:
-            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
-            return f"Bot execution stopped and archived: {result}"
-        else:
-            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
-                     for controller in controller_names]
-            result = await asyncio.gather(*tasks)
-            return f"Controller execution stopped: {result}"
+        active_bots = await client.bot_orchestration.get_active_bots_status()
+
+        if not isinstance(active_bots, dict) or "data" not in active_bots:
+            return "No active bots data found"
+
+        if bot_name not in active_bots["data"]:
+            available_bots = list(active_bots["data"].keys())
+            return f"Bot '{bot_name}' not found. Available bots: {available_bots}"
+
+        bot_data = active_bots["data"][bot_name]
+
+        # Validate limit
+        limit = min(max(1, limit), 1000)
+
+        logs = []
+
+        # Collect error logs if requested
+        if log_type in ["error", "all"] and "error_logs" in bot_data:
+            error_logs = bot_data["error_logs"]
+            for log_entry in error_logs:
+                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
+                    log_entry["log_category"] = "error"
+                    logs.append(log_entry)
+
+        # Collect general logs if requested
+        if log_type in ["general", "all"] and "general_logs" in bot_data:
+            general_logs = bot_data["general_logs"]
+            for log_entry in general_logs:
+                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
+                    log_entry["log_category"] = "general"
+                    logs.append(log_entry)
+
+        # Sort logs by timestamp (most recent first) and apply limit
+        logs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        logs = logs[:limit]
+
+        result = {
+            "bot_name": bot_name,
+            "log_type": log_type,
+            "search_term": search_term,
+            "total_logs_returned": len(logs),
+            "logs": logs
+        }
+
+        return f"Bot Logs Result: {result}"
+
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
             "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    except Exception as e:
+        logger.error(f"get_bot_logs failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get bot logs: {str(e)}")
+
+
+@mcp.tool()
+async def manage_bot_execution(
+        bot_name: str,
+        action: Literal["stop_bot", "stop_controllers", "start_controllers"],
+        controller_names: list[str] | None = None,
+):
+    """
+    Manage bot and controller execution states.
+
+    Actions:
+    - "stop_bot": Stop and archive the entire bot forever (controller_names not needed)
+    - "stop_controllers": Stop specific controllers by setting manual_kill_switch to True (requires controller_names)
+    - "start_controllers": Start/resume specific controllers by setting manual_kill_switch to False (requires controller_names)
+
+    Args:
+        bot_name: Name of the bot to manage
+        action: The action to perform ("stop_bot", "stop_controllers", or "start_controllers")
+        controller_names: List of controller names (required for stop_controllers and start_controllers actions)
+    """
+    try:
+        client = await hummingbot_client.get_client()
+
+        if action == "stop_bot":
+            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
+            return f"Bot execution stopped and archived: {result}"
+
+        elif action == "stop_controllers":
+            if controller_names is None or len(controller_names) == 0:
+                raise ValueError("controller_names is required for stop_controllers action")
+            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
+                     for controller in controller_names]
+            result = await asyncio.gather(*tasks)
+            return f"Controllers stopped: {result}"
+
+        elif action == "start_controllers":
+            if controller_names is None or len(controller_names) == 0:
+                raise ValueError("controller_names is required for start_controllers action")
+            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": False})
+                     for controller in controller_names]
+            result = await asyncio.gather(*tasks)
+            return f"Controllers started: {result}"
+
+        else:
+            raise ValueError(f"Invalid action: {action}")
+
+    except HBConnectionError as e:
+        logger.error(f"Failed to connect to Hummingbot API: {e}")
+        raise ToolError(
+            "Failed to connect to Hummingbot API. Please ensure it is running and API credentials are correct.")
+    except Exception as e:
+        logger.error(f"manage_bot_execution failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage bot execution: {str(e)}")
+
+
+# Backward compatibility alias (deprecated)
+@mcp.tool()
+async def stop_bot_or_controllers(
+        bot_name: str,
+        controller_names: list[str] | None = None,
+):
+    """
+    [DEPRECATED - Use manage_bot_execution instead]
+    Stop and archive a bot forever or stop the execution of controllers in a running bot.
+
+    Args:
+        bot_name: Name of the bot to stop
+        controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
+    """
+    action = "stop_bot" if controller_names is None or len(controller_names) == 0 else "stop_controllers"
+    return await manage_bot_execution(bot_name, action, controller_names)
 
 
 async def main():
     """Run the MCP server"""
     # Setup logging once at application start
     logger.info("Starting Hummingbot MCP Server")
-    logger.info(f"API URL: {settings.api_url}")
+    logger.info(f"Configured API URL: {settings.api_url}")
     logger.info(f"Default Account: {settings.default_account}")
-
-    # Test API connection
-    try:
-        client = await hummingbot_client.initialize()
-        accounts = await client.accounts.list_accounts()
-        logger.info(f"Successfully connected to Hummingbot API. Found {len(accounts)} accounts.")
-    except Exception as e:
-        logger.error(f"Failed to connect to Hummingbot API: {e}")
-        logger.error("Please ensure Hummingbot is running and API credentials are correct.")
-        # Don't exit - let MCP server start anyway and handle errors per request
+    logger.info("Server will connect to API on first use (lazy initialization)")
+    logger.info("💡 Use 'configure_api_servers' tool to manage API server connections")
 
     # Run the server with FastMCP
+    # Connection to API will happen lazily on first tool use
     try:
         await mcp.run_stdio_async()
     finally:
-        # Clean up client connection
+        # Clean up client connection if it was initialized
         await hummingbot_client.close()
 
 

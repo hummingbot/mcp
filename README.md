@@ -64,12 +64,42 @@ An MCP (Model Context Protocol) server that enables Claude and Gemini CLI to int
    HUMMINGBOT_PASSWORD=admin
    ```
 
+   **Important**: When running the MCP server in Docker and connecting to a Hummingbot API on your host:
+   - **Linux**: Use `--network host` (see below) to allow the container to access `localhost:8000`
+   - **Mac/Windows**: Change `HUMMINGBOT_API_URL` to `http://host.docker.internal:8000`
+
 3. **Pull the Docker image**:
    ```bash
    docker pull hummingbot/hummingbot-mcp:latest
    ```
 
 4. **Configure in Claude Code or Gemini CLI**:
+
+   **For Linux (using --network host)**:
+   ```json
+   {
+     "mcpServers": {
+       "hummingbot-mcp": {
+         "type": "stdio",
+         "command": "docker",
+         "args": [
+           "run",
+           "--rm",
+           "-i",
+           "--network",
+           "host",
+           "--env-file",
+           "/path/to/mcp/.env",
+           "-v",
+           "$HOME/.hummingbot_mcp:/root/.hummingbot_mcp",
+           "hummingbot/hummingbot-mcp:latest"
+         ]
+       }
+     }
+   }
+   ```
+
+   **For Mac/Windows**:
    ```json
    {
      "mcpServers": {
@@ -82,13 +112,16 @@ An MCP (Model Context Protocol) server that enables Claude and Gemini CLI to int
            "-i",
            "--env-file",
            "/path/to/mcp/.env",
+           "-v",
+           "$HOME/.hummingbot_mcp:/root/.hummingbot_mcp",
            "hummingbot/hummingbot-mcp:latest"
          ]
        }
      }
    }
    ```
-   
+   (Remember to set `HUMMINGBOT_API_URL=http://host.docker.internal:8000` in your `.env` file)
+
    **Note**: Make sure to replace `/path/to/mcp` with the actual path to your MCP directory.
 
 ### Cloud Deployment with Docker Compose
@@ -236,21 +269,70 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
    docker ps
    ```
 
+## Managing Multiple API Servers
+
+The MCP server now supports managing multiple Hummingbot API servers. This is useful when you have multiple deployments or environments.
+
+### Initial Setup
+
+On first run, the server creates a default server from environment variables (or uses `http://localhost:8000` with default credentials). Configuration is stored in `~/.hummingbot_mcp/servers.yml`.
+
+### Using the configure_api_servers Tool
+
+```
+# List all configured servers
+configure_api_servers()
+
+# Add a new server using full URL
+configure_api_servers(
+    action="add",
+    name="production",
+    url="http://prod-server:8000",
+    username="admin",
+    password="secure_password"
+)
+
+# Add a server using just port (defaults to localhost)
+configure_api_servers(
+    action="add",
+    name="local_8001",
+    port=8001,
+    username="admin",
+    password="secure_password"
+)
+
+# Add a server using default port 8000
+configure_api_servers(
+    action="add",
+    name="local_default",
+    username="admin",
+    password="secure_password"
+)
+
+# Switch to a different server
+configure_api_servers(action="set_default", name="production")
+
+# Remove a server
+configure_api_servers(action="remove", name="old_server")
+```
+
+All subsequent API calls will use the currently selected default server.
+
 ## Environment Variables
 
 The following environment variables can be set in your `.env` file for the MCP server:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HUMMINGBOT_API_URL` | `http://localhost:8000` | URL of the Hummingbot API server |
-| `HUMMINGBOT_USERNAME` | `admin` | Username for API authentication |
-| `HUMMINGBOT_PASSWORD` | `admin` | Password for API authentication |
+| `HUMMINGBOT_API_URL` | `http://localhost:8000` | Initial default API server URL (used only on first run) |
+| `HUMMINGBOT_USERNAME` | `admin` | Initial username (used only on first run) |
+| `HUMMINGBOT_PASSWORD` | `admin` | Initial password (used only on first run) |
 | `HUMMINGBOT_TIMEOUT` | `30.0` | Connection timeout in seconds |
 | `HUMMINGBOT_MAX_RETRIES` | `3` | Maximum number of retry attempts |
 | `HUMMINGBOT_RETRY_DELAY` | `2.0` | Delay between retries in seconds |
 | `HUMMINGBOT_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 
-**Note**: Hummingbot API server environment variables are configured directly in the `docker-compose.yml` file.
+**Note**: After initial setup, use the `configure_api_servers` tool to manage servers. Environment variables are only used to create the initial default server.
 
 ## Requirements
 
@@ -261,12 +343,24 @@ The following environment variables can be set in your `.env` file for the MCP s
 ## Available Tools
 
 The MCP server provides tools for:
-- Account management
-- Portfolio balances
-- Order placement
+
+### Server Management
+- **configure_api_servers**: Manage multiple Hummingbot API server connections
+  - List all configured servers
+  - Add new servers with credentials
+  - Set default server (automatically reconnects client)
+  - Remove servers
+  - Configuration persists in `~/.hummingbot_mcp/servers.yml`
+
+### Trading & Account Management
+- Account management and connector setup
+- Portfolio balances and distribution
+- Order placement and management
 - Position management
 - Market data (prices, order books, candles)
 - Funding rates
+- Bot deployment and management
+- Controller configuration
 
 ## Development
 
@@ -284,8 +378,43 @@ uv run pytest
 
 ## Troubleshooting
 
-1. **Connection Issues**: Ensure the Hummingbot API server is running and accessible at the URL specified in your `.env` file.
+The MCP server now provides **comprehensive error messages** to help diagnose connection and authentication issues:
 
-2. **Authentication Errors**: Verify your username and password in the `.env` file match your Hummingbot API credentials.
+### Connection Errors
 
-3. **Docker Issues**: Make sure the `.env` file is in the same directory as your `docker-compose.yml` or specify the correct path in the Docker run command.
+If you see error messages like:
+- `❌ Cannot reach Hummingbot API at <url>` - The API server is not running or not accessible
+- `❌ Authentication failed when connecting to Hummingbot API` - Incorrect username or password
+- `❌ Failed to connect to Hummingbot API` - Generic connection failure
+
+The error messages will include:
+- The exact URL being used
+- Your configured username (password is masked)
+- Specific suggestions on how to fix the issue
+- References to tools like `configure_api_servers`
+
+### Common Solutions
+
+1. **API Not Running**:
+   - Ensure your Hummingbot API server is running
+   - Verify the API is accessible at the configured URL
+
+2. **Wrong Credentials**:
+   - Use `configure_api_servers` tool to update server credentials
+   - Or check your `.env` file configuration
+
+3. **Wrong URL**:
+   - Use `configure_api_servers` tool to update the server URL
+   - For Docker on Mac/Windows, use `host.docker.internal` instead of `localhost`
+
+4. **Docker Network Issues**:
+   - On Linux, use `--network host` in your Docker configuration
+   - On Mac/Windows, use `host.docker.internal:8000` as the API URL
+
+### Error Prevention
+
+The MCP server will:
+- **Not retry** on authentication failures (401 errors) - it will immediately tell you the credentials are wrong
+- **Retry** on connection failures with helpful messages about what might be wrong
+- **Provide context** about whether you're running in Docker and suggest appropriate fixes
+- **Guide you** to the right tools (`configure_api_servers`) to fix issues
