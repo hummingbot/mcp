@@ -16,6 +16,8 @@ from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnection
 from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools.account import SetupConnectorRequest
+from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
+from hummingbot_mcp.tools.gateway_trading import GatewaySwapRequest
 
 # Configure root logger
 logging.basicConfig(
@@ -1016,6 +1018,213 @@ async def stop_bot_or_controllers(
     """
     action = "stop_bot" if controller_names is None or len(controller_names) == 0 else "stop_controllers"
     return await manage_bot_execution(bot_name, action, controller_names)
+
+
+# Gateway Management Tools
+
+
+@mcp.tool()
+async def manage_gateway_container(
+        action: Literal["get_status", "start", "stop", "restart", "get_logs"],
+        config: dict[str, Any] | None = None,
+        tail: int | None = 100,
+) -> str:
+    """Manage Gateway container lifecycle operations.
+
+    Supports:
+    - get_status: Check Gateway container status
+    - start: Start Gateway with configuration
+    - stop: Stop Gateway container
+    - restart: Restart Gateway (optionally with new config)
+    - get_logs: Get container logs
+
+    Args:
+        action: Action to perform on Gateway container
+        config: Gateway configuration (required for 'start', optional for 'restart').
+               Required fields: passphrase (Gateway passphrase), image (Docker image).
+               Optional fields: port (exposed port, default: 15888), environment (env vars)
+        tail: Number of log lines to retrieve (only for 'get_logs' action, default: 100, max: 200)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayContainerRequest(action=action, config=config, tail=tail)
+
+        from .tools.gateway import manage_gateway_container as manage_gateway_container_impl
+
+        result = await manage_gateway_container_impl(request)
+        return f"Gateway Container Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_container failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage gateway container: {str(e)}")
+
+
+@mcp.tool()
+async def manage_gateway_config(
+        resource_type: Literal["chains", "networks", "tokens", "connectors", "pools", "wallets"],
+        action: Literal["list", "get", "update", "add", "delete"],
+        network_id: str | None = None,
+        connector_name: str | None = None,
+        config_updates: dict[str, Any] | None = None,
+        token_address: str | None = None,
+        token_symbol: str | None = None,
+        token_decimals: int | None = None,
+        token_name: str | None = None,
+        pool_type: str | None = None,
+        pool_base: str | None = None,
+        pool_quote: str | None = None,
+        pool_address: str | None = None,
+        search: str | None = None,
+        network: str | None = None,
+        chain: str | None = None,
+        private_key: str | None = None,
+        wallet_address: str | None = None,
+) -> str:
+    """Manage Gateway configuration for chains, networks, tokens, connectors, pools, and wallets.
+
+    Resource Types:
+    - chains: Get all blockchain chains
+    - networks: List/get/update network configurations (format: 'chain-network')
+    - tokens: List/add/delete tokens per network
+    - connectors: List/get/update DEX connector configurations
+    - pools: List/add liquidity pools per connector/network
+    - wallets: Add/delete wallets for blockchain chains
+
+    Args:
+        resource_type: Type of resource to manage
+        action: Action to perform on the resource
+        network_id: Network ID in format 'chain-network' (e.g., 'solana-mainnet-beta')
+        connector_name: DEX connector name (e.g., 'meteora', 'raydium')
+        config_updates: Configuration updates as key-value pairs
+        token_address: Token contract address
+        token_symbol: Token symbol (e.g., 'USDC')
+        token_decimals: Token decimals (e.g., 6 for USDC)
+        token_name: Token name (optional)
+        pool_type: Pool type (e.g., 'CLMM', 'AMM')
+        pool_base: Base token symbol for pool
+        pool_quote: Quote token symbol for pool
+        pool_address: Pool contract address
+        search: Search term to filter tokens
+        network: Network name (e.g., 'mainnet-beta') for pool operations
+        chain: Blockchain chain for wallet (e.g., 'solana', 'ethereum')
+        private_key: Private key for wallet (required for 'add' wallet action)
+        wallet_address: Wallet address (required for 'delete' wallet action)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayConfigRequest(
+            resource_type=resource_type,
+            action=action,
+            network_id=network_id,
+            connector_name=connector_name,
+            config_updates=config_updates,
+            token_address=token_address,
+            token_symbol=token_symbol,
+            token_decimals=token_decimals,
+            token_name=token_name,
+            pool_type=pool_type,
+            pool_base=pool_base,
+            pool_quote=pool_quote,
+            pool_address=pool_address,
+            search=search,
+            network=network,
+            chain=chain,
+            private_key=private_key,
+            wallet_address=wallet_address,
+        )
+
+        from .tools.gateway import manage_gateway_config as manage_gateway_config_impl
+
+        result = await manage_gateway_config_impl(request)
+        return f"Gateway Configuration Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_config failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage gateway configuration: {str(e)}")
+
+
+@mcp.tool()
+async def manage_gateway_swaps(
+        action: Literal["quote", "execute", "search", "get_status"],
+        connector: str | None = None,
+        network: str | None = None,
+        trading_pair: str | None = None,
+        side: Literal["BUY", "SELL"] | None = None,
+        amount: str | None = None,
+        slippage_pct: str | None = "1.0",
+        wallet_address: str | None = None,
+        transaction_hash: str | None = None,
+        search_connector: str | None = None,
+        search_network: str | None = None,
+        search_wallet_address: str | None = None,
+        search_trading_pair: str | None = None,
+        status: Literal["SUBMITTED", "CONFIRMED", "FAILED"] | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int | None = 50,
+        offset: int | None = 0,
+) -> str:
+    """Manage Gateway swap operations: quote, execute, search swaps.
+
+    Supports DEX router swaps via Jupiter (Solana) and 0x (Ethereum).
+
+    Actions:
+    - quote: Get price quote for a swap before executing
+    - execute: Execute a swap transaction on DEX
+    - search: Search swap history with filters
+    - get_status: Get status of a specific swap by transaction hash
+
+    Quote/Execute Parameters (required for quote/execute):
+        connector: DEX router connector (e.g., 'jupiter', '0x')
+        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta', 'ethereum-mainnet')
+        trading_pair: Trading pair in BASE-QUOTE format (e.g., 'SOL-USDC', 'ETH-USDT')
+        side: Trade side - 'BUY' (buy base with quote) or 'SELL' (sell base for quote)
+        amount: Amount to swap (for BUY: base to receive, for SELL: base to sell)
+        slippage_pct: Maximum slippage percentage (default: 1.0)
+        wallet_address: Wallet address for execute (optional, uses default if not provided)
+
+    Get Status Parameters:
+        transaction_hash: Transaction hash to check status
+
+    Search Parameters (all optional):
+        search_connector: Filter by connector
+        search_network: Filter by network
+        search_wallet_address: Filter by wallet address
+        search_trading_pair: Filter by trading pair
+        status: Filter by status (SUBMITTED, CONFIRMED, FAILED)
+        start_time: Start timestamp (unix seconds)
+        end_time: End timestamp (unix seconds)
+        limit: Max results (default: 50, max: 1000)
+        offset: Pagination offset (default: 0)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewaySwapRequest(
+            action=action,
+            connector=connector,
+            network=network,
+            trading_pair=trading_pair,
+            side=side,
+            amount=amount,
+            slippage_pct=slippage_pct,
+            wallet_address=wallet_address,
+            transaction_hash=transaction_hash,
+            search_connector=search_connector,
+            search_network=search_network,
+            search_wallet_address=search_wallet_address,
+            search_trading_pair=search_trading_pair,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            offset=offset,
+        )
+
+        from .tools.gateway_trading import manage_gateway_swaps as manage_gateway_swaps_impl
+
+        result = await manage_gateway_swaps_impl(request)
+        return f"Gateway Swap Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_swaps failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage gateway swaps: {str(e)}")
 
 
 async def main():
