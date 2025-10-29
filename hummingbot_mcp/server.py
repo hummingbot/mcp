@@ -18,6 +18,7 @@ from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools.account import SetupConnectorRequest
 from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
 from hummingbot_mcp.tools.gateway_swap import GatewaySwapRequest
+from hummingbot_mcp.tools.gateway_clmm import GatewayCLMMPoolRequest, GatewayCLMMPositionRequest
 
 # Configure root logger
 logging.basicConfig(
@@ -1204,6 +1205,181 @@ async def manage_gateway_swaps(
     except Exception as e:
         logger.error(f"manage_gateway_swaps failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage gateway swaps: {str(e)}")
+
+
+@mcp.tool()
+async def explore_gateway_clmm_pools(
+        action: Literal["list_pools", "get_pool_info"],
+        connector: str,
+        network: str | None = None,
+        pool_address: str | None = None,
+        page: int = 0,
+        limit: int = 50,
+        search_term: str | None = None,
+        sort_key: str | None = "volume",
+        order_by: str | None = "desc",
+        include_unknown: bool = True,
+) -> str:
+    """Explore Gateway CLMM pools: list pools and get pool information.
+
+    Supports CLMM DEX connectors (Meteora, Raydium, Uniswap V3) for concentrated liquidity pools.
+
+    Actions:
+    - list_pools: Browse available CLMM pools with filtering and sorting
+    - get_pool_info: Get detailed information about a specific pool (requires network and pool_address)
+
+    Args:
+        action: Action to perform ('list_pools' or 'get_pool_info')
+        connector: CLMM connector name (e.g., 'meteora', 'raydium', 'uniswap')
+        network: Network ID in 'chain-network' format (required for get_pool_info, e.g., 'solana-mainnet-beta')
+        pool_address: Pool contract address (required for get_pool_info)
+        page: Page number for list_pools (default: 0)
+        limit: Results per page for list_pools (default: 50, max: 100)
+        search_term: Search term to filter pools by token symbols (e.g., 'SOL', 'USDC')
+        sort_key: Sort by field (volume, tvl, feetvlratio, etc.)
+        order_by: Sort order ('asc' or 'desc')
+        include_unknown: Include pools with unverified tokens (default: True)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayCLMMPoolRequest(
+            action=action,
+            connector=connector,
+            network=network,
+            pool_address=pool_address,
+            page=page,
+            limit=limit,
+            search_term=search_term,
+            sort_key=sort_key,
+            order_by=order_by,
+            include_unknown=include_unknown,
+        )
+
+        from .tools.gateway_clmm import explore_gateway_clmm_pools as explore_gateway_clmm_pools_impl
+
+        result = await explore_gateway_clmm_pools_impl(request)
+
+        # Return formatted table for list_pools to reduce response size
+        if action == "list_pools" and "pools_table" in result:
+            summary = (
+                f"Gateway CLMM Pool Exploration Result:\n"
+                f"Connector: {result['connector']}\n"
+                f"Total Pools: {result['pagination']['total']}\n"
+                f"Page: {result['pagination']['page']}, Limit: {result['pagination']['limit']}\n"
+                f"Filters: {result['filters']}\n\n"
+                f"{result['pools_table']}"
+            )
+            return summary
+
+        return f"Gateway CLMM Pool Exploration Result: {result}"
+    except Exception as e:
+        logger.error(f"explore_gateway_clmm_pools failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to explore gateway CLMM pools: {str(e)}")
+
+
+@mcp.tool()
+async def manage_gateway_clmm_positions(
+        action: Literal["open_position", "close_position", "collect_fees", "get_positions", "search_positions"],
+        connector: str | None = None,
+        network: str | None = None,
+        wallet_address: str | None = None,
+        pool_address: str | None = None,
+        position_address: str | None = None,
+        lower_price: str | None = None,
+        upper_price: str | None = None,
+        base_token_amount: str | None = None,
+        quote_token_amount: str | None = None,
+        slippage_pct: str | None = "1.0",
+        extra_params: dict[str, Any] | None = None,
+        search_network: str | None = None,
+        search_connector: str | None = None,
+        search_wallet_address: str | None = None,
+        trading_pair: str | None = None,
+        status: Literal["OPEN", "CLOSED"] | None = None,
+        position_addresses: list[str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        refresh: bool = False,
+) -> str:
+    """Manage Gateway CLMM positions: open, close, collect fees, and search positions.
+
+    Supports CLMM DEX connectors (Meteora, Raydium, Uniswap V3) for concentrated liquidity positions.
+
+    Actions:
+    - open_position: Create a new CLMM position with initial liquidity
+    - close_position: Close a position completely (removes all liquidity)
+    - collect_fees: Collect accumulated fees from a position
+    - get_positions: Get all positions owned by a wallet for a specific pool
+    - search_positions: Search positions with various filters
+
+    Open Position Parameters (required for open_position):
+        connector: CLMM connector name (e.g., 'meteora', 'raydium')
+        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta')
+        pool_address: Pool contract address
+        lower_price: Lower price bound (e.g., '150')
+        upper_price: Upper price bound (e.g., '250')
+        base_token_amount: Amount of base token to provide (optional)
+        quote_token_amount: Amount of quote token to provide (optional)
+        slippage_pct: Maximum slippage percentage (default: 1.0)
+        wallet_address: Wallet address (optional, uses default if not provided)
+        extra_params: Additional connector-specific parameters (e.g., {"strategyType": 0} for Meteora)
+
+    Close/Collect Parameters (required for close_position and collect_fees):
+        connector: CLMM connector name
+        network: Network ID in 'chain-network' format
+        position_address: Position NFT address
+        wallet_address: Wallet address (optional)
+
+    Get Positions Parameters (required for get_positions):
+        connector: CLMM connector name
+        network: Network ID in 'chain-network' format
+        pool_address: Pool contract address
+        wallet_address: Wallet address (optional)
+
+    Search Parameters (optional for search_positions):
+        search_network: Filter by network
+        search_connector: Filter by connector
+        search_wallet_address: Filter by wallet address
+        trading_pair: Filter by trading pair (e.g., 'SOL-USDC')
+        status: Filter by status (OPEN, CLOSED)
+        position_addresses: Filter by specific position addresses
+        limit: Max results (default: 50, max: 1000)
+        offset: Pagination offset (default: 0)
+        refresh: Refresh position data from Gateway before returning (default: False)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayCLMMPositionRequest(
+            action=action,
+            connector=connector,
+            network=network,
+            wallet_address=wallet_address,
+            pool_address=pool_address,
+            position_address=position_address,
+            lower_price=lower_price,
+            upper_price=upper_price,
+            base_token_amount=base_token_amount,
+            quote_token_amount=quote_token_amount,
+            slippage_pct=slippage_pct,
+            extra_params=extra_params,
+            search_network=search_network,
+            search_connector=search_connector,
+            search_wallet_address=search_wallet_address,
+            trading_pair=trading_pair,
+            status=status,
+            position_addresses=position_addresses,
+            limit=limit,
+            offset=offset,
+            refresh=refresh,
+        )
+
+        from .tools.gateway_clmm import manage_gateway_clmm_positions as manage_gateway_clmm_positions_impl
+
+        result = await manage_gateway_clmm_positions_impl(request)
+        return f"Gateway CLMM Position Management Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_clmm_positions failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage gateway CLMM positions: {str(e)}")
 
 
 async def main():
