@@ -271,7 +271,7 @@ async def place_order(
         position_action: str | None = "OPEN",
         account_name: str | None = "master_account",
 ) -> str:
-    """Place a buy or sell order (supports USD values by adding at the start of the amount $).
+    """Place a buy or sell order on a OrderBook Exchange (supports USD values by adding at the start of the amount $).
 
     Args:
         connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
@@ -1000,27 +1000,6 @@ async def manage_bot_execution(
     except Exception as e:
         logger.error(f"manage_bot_execution failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage bot execution: {str(e)}")
-
-
-# Backward compatibility alias (deprecated)
-@mcp.tool()
-async def stop_bot_or_controllers(
-        bot_name: str,
-        controller_names: list[str] | None = None,
-):
-    """
-    [DEPRECATED - Use manage_bot_execution instead]
-    Stop and archive a bot forever or stop the execution of controllers in a running bot.
-
-    Args:
-        bot_name: Name of the bot to stop
-        controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
-    """
-    action = "stop_bot" if controller_names is None or len(controller_names) == 0 else "stop_controllers"
-    return await manage_bot_execution(bot_name, action, controller_names)
-
-
-# Gateway Management Tools
 
 
 @mcp.tool()
