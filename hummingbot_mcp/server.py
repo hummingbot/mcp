@@ -17,7 +17,7 @@ from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools.account import SetupConnectorRequest
 from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
-from hummingbot_mcp.tools.gateway_trading import GatewaySwapRequest
+from hummingbot_mcp.tools.gateway_swap import GatewaySwapRequest
 
 # Configure root logger
 logging.basicConfig(
@@ -1197,7 +1197,7 @@ async def manage_gateway_swaps(
             offset=offset,
         )
 
-        from .tools.gateway_trading import manage_gateway_swaps as manage_gateway_swaps_impl
+        from .tools.gateway_swap import manage_gateway_swaps as manage_gateway_swaps_impl
 
         result = await manage_gateway_swaps_impl(request)
         return f"Gateway Swap Result: {result}"

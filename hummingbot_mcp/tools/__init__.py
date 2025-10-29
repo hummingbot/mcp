@@ -2,7 +2,7 @@
 
 from .account import setup_connector
 from .gateway import manage_gateway_container, manage_gateway_config
-from .gateway_trading import manage_gateway_swaps
+from .gateway_swap import manage_gateway_swaps
 
 # Tool registry for the MCP server
 TOOLS = [
