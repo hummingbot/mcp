@@ -177,7 +177,7 @@ async def manage_gateway_swaps(request: GatewaySwapRequest) -> dict[str, Any]:
             if "-" not in request.trading_pair:
                 raise ToolError(f"Invalid trading_pair format. Expected 'BASE-QUOTE', got '{request.trading_pair}'")
 
-            result = await client.gateway_trading.get_swap_quote(
+            result = await client.gateway_swap.get_swap_quote(
                 connector=request.connector,
                 network=request.network,
                 trading_pair=request.trading_pair,
@@ -214,7 +214,7 @@ async def manage_gateway_swaps(request: GatewaySwapRequest) -> dict[str, Any]:
             if "-" not in request.trading_pair:
                 raise ToolError(f"Invalid trading_pair format. Expected 'BASE-QUOTE', got '{request.trading_pair}'")
 
-            result = await client.gateway_trading.execute_swap(
+            result = await client.gateway_swap.execute_swap(
                 connector=request.connector,
                 network=request.network,
                 trading_pair=request.trading_pair,
@@ -239,7 +239,7 @@ async def manage_gateway_swaps(request: GatewaySwapRequest) -> dict[str, Any]:
             if not request.transaction_hash:
                 raise ToolError("transaction_hash is required for get_status action")
 
-            result = await client.gateway_trading.get_swap_status(request.transaction_hash)
+            result = await client.gateway_swap.get_swap_status(request.transaction_hash)
 
             return {
                 "action": "get_status",
@@ -273,7 +273,7 @@ async def manage_gateway_swaps(request: GatewaySwapRequest) -> dict[str, Any]:
             if request.end_time:
                 search_params["end_time"] = request.end_time
 
-            result = await client.gateway_trading.search_swaps(**search_params)
+            result = await client.gateway_swap.search_swaps(**search_params)
 
             return {
                 "action": "search",
