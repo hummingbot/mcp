@@ -2126,9 +2126,13 @@ async def manage_gateway_clmm_positions(
         position_addresses: Filter by specific position addresses
         limit: Max results (default: 50, max: 1000)
         offset: Pagination offset (default: 0)
-        refresh: Refresh position data from Gateway before returning (default: False)
+        refresh: Refresh position data from Gateway before returning (default: True for get_positions/search_positions)
     """
     try:
+        # Auto-enable refresh for get_positions and search_positions to ensure fresh data
+        if action in ["get_positions", "search_positions"] and not refresh:
+            refresh = True
+
         # Create and validate request using Pydantic model
         request = GatewayCLMMPositionRequest(
             action=action,
