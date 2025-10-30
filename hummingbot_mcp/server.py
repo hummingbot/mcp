@@ -269,6 +269,127 @@ def format_positions_as_table(positions: list[dict[str, Any]]) -> str:
     return table
 
 
+def format_prices_as_table(prices_data: dict[str, Any]) -> str:
+    """
+    Format prices data as a table string for better LLM processing.
+    Columns: trading_pair | price
+    """
+    prices = prices_data.get("prices", {})
+
+    if not prices:
+        return "No prices available."
+
+    # Header
+    header = "trading_pair      | price"
+    separator = "-" * 50
+
+    # Format each price as a row
+    rows = []
+    for pair, price in prices.items():
+        pair_str = pair[:16].ljust(16)
+        price_str = f"${price:,.2f}" if price >= 1 else f"${price:.6f}"
+        row = f"{pair_str}  | {price_str}"
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
+def format_candles_as_table(candles: list[dict[str, Any]]) -> str:
+    """
+    Format candle data as a table string for better LLM processing.
+    Columns: time | open | high | low | close | volume
+    """
+    if not candles:
+        return "No candles found."
+
+    from datetime import datetime
+
+    def format_timestamp(ts: float) -> str:
+        """Format unix timestamp to readable datetime"""
+        try:
+            dt = datetime.fromtimestamp(ts)
+            return dt.strftime("%m/%d %H:%M")
+        except:
+            return "N/A"
+
+    def format_price(price: Any) -> str:
+        """Format price"""
+        try:
+            return f"{float(price):.2f}"
+        except:
+            return "N/A"
+
+    def format_volume(vol: Any) -> str:
+        """Format volume compactly"""
+        try:
+            vol_float = float(vol)
+            if vol_float >= 1_000_000:
+                return f"{vol_float/1_000_000:.2f}M"
+            elif vol_float >= 1_000:
+                return f"{vol_float/1_000:.2f}K"
+            else:
+                return f"{vol_float:.2f}"
+        except:
+            return "N/A"
+
+    # Header
+    header = "time        | open     | high     | low      | close    | volume"
+    separator = "-" * 85
+
+    # Format each candle as a row
+    rows = []
+    for candle in candles:
+        time_str = format_timestamp(candle.get("timestamp", 0))
+        open_price = format_price(candle.get("open"))
+        high_price = format_price(candle.get("high"))
+        low_price = format_price(candle.get("low"))
+        close_price = format_price(candle.get("close"))
+        volume = format_volume(candle.get("volume"))
+
+        row = f"{time_str:11} | {open_price:8} | {high_price:8} | {low_price:8} | {close_price:8} | {volume}"
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
+def format_order_book_as_table(order_book_data: dict[str, Any]) -> str:
+    """
+    Format order book snapshot as a table string for better LLM processing.
+    Shows top 10 bids and asks side by side.
+    """
+    bids = order_book_data.get("bids", [])[:10]
+    asks = order_book_data.get("asks", [])[:10]
+
+    if not bids and not asks:
+        return "No order book data available."
+
+    # Header
+    header = "BIDS                      |  ASKS"
+    sub_header = "price      | amount       |  price      | amount"
+    separator = "-" * 65
+
+    # Format rows
+    rows = []
+    max_rows = max(len(bids), len(asks))
+
+    for i in range(max_rows):
+        bid_price = f"{bids[i]['price']:10.2f}" if i < len(bids) else " " * 10
+        bid_amount = f"{bids[i]['amount']:12.3f}" if i < len(bids) else " " * 12
+        ask_price = f"{asks[i]['price']:10.2f}" if i < len(asks) else " " * 10
+        ask_amount = f"{asks[i]['amount']:12.3f}" if i < len(asks) else " " * 12
+
+        row = f"{bid_price} | {bid_amount} |  {ask_price} | {ask_amount}"
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{sub_header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
 def format_portfolio_as_table(portfolio_data: dict[str, Any]) -> str:
     """
     Format portfolio balances as a table string for better LLM processing.
@@ -878,7 +999,21 @@ async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
     try:
         client = await hummingbot_client.get_client()
         prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pairs)
-        return f"Price results: {prices}"
+
+        # Format prices as table for better readability
+        prices_table = format_prices_as_table(prices)
+
+        from datetime import datetime
+        timestamp = prices.get("timestamp", 0)
+        time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "N/A"
+
+        summary = (
+            f"Latest Prices for {connector_name}:\n"
+            f"Timestamp: {time_str}\n\n"
+            f"{prices_table}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -920,7 +1055,18 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
         candles = await client.market_data.get_candles(
             connector_name=connector_name, trading_pair=trading_pair, interval=interval, max_records=max_records
         )
-        return f"Candle results: {candles}"
+
+        # Format candles as table for better readability
+        candles_table = format_candles_as_table(candles)
+
+        summary = (
+            f"Candles for {trading_pair} on {connector_name}:\n"
+            f"Interval: {interval}\n"
+            f"Total Candles: {len(candles)}\n\n"
+            f"{candles_table}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -946,7 +1092,24 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
             )
         funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
                                                                  trading_pair=trading_pair)
-        return f"Funding Rate: {funding_rate}"
+
+        # Format funding rate as clean text
+        from datetime import datetime
+        next_funding_time = funding_rate.get("next_funding_time", 0)
+        time_str = datetime.fromtimestamp(next_funding_time).strftime("%Y-%m-%d %H:%M:%S") if next_funding_time else "N/A"
+
+        rate = funding_rate.get("funding_rate", 0)
+        rate_pct = rate * 100  # Convert to percentage
+
+        summary = (
+            f"Funding Rate for {trading_pair} on {connector_name}:\n\n"
+            f"Funding Rate: {rate_pct:.4f}%\n"
+            f"Mark Price: ${funding_rate.get('mark_price', 0):.2f}\n"
+            f"Index Price: ${funding_rate.get('index_price', 0):.2f}\n"
+            f"Next Funding Time: {time_str}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -979,7 +1142,22 @@ async def get_order_book(
         if query_type == "snapshot":
             order_book = await client.market_data.get_order_book(connector_name=connector_name,
                                                                  trading_pair=trading_pair)
-            return f"Order Book Snapshot: {order_book}"
+
+            # Format order book as table for better readability
+            order_book_table = format_order_book_as_table(order_book)
+
+            from datetime import datetime
+            timestamp = order_book.get("timestamp", 0)
+            time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "N/A"
+
+            summary = (
+                f"Order Book Snapshot for {trading_pair} on {connector_name}:\n"
+                f"Timestamp: {time_str}\n"
+                f"Top 10 Levels:\n\n"
+                f"{order_book_table}"
+            )
+
+            return summary
         else:
             if query_value is None:
                 raise ValueError(f"query_value must be provided for query_type '{query_type}'")
@@ -1001,7 +1179,17 @@ async def get_order_book(
                 )
             else:
                 raise ValueError(f"Unsupported query type: {query_type}")
-            return f"Order Book Query Result: {result}"
+
+            # Format query results as clean text
+            side_str = "BUY" if is_buy else "SELL"
+            summary = (
+                f"Order Book Query for {trading_pair} on {connector_name}:\n\n"
+                f"Query Type: {query_type}\n"
+                f"Query Value: {query_value}\n"
+                f"Side: {side_str}\n"
+                f"Result: {result}"
+            )
+            return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -1093,10 +1281,41 @@ async def explore_controllers(
             # Get controller code and configs
             controller_code = await client.controllers.get_controller(controller_type, controller_name)
             controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
-            result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
             template = await client.controllers.get_controller_config_template(controller_type, controller_name)
-            result += f"All configs available for controller:\n {controller_configs}"
-            result += f"\n\nController Config Template:\n{template}\n\n"
+
+            result += f"Controller: {controller_name} ({controller_type})\n\n"
+            result += f"Controller Code:\n{controller_code}\n\n"
+
+            # Format configs list more compactly
+            result += f"Total Configs Available: {len(controller_configs)}\n"
+            # Show first 10 configs, or all if less than 10
+            if len(controller_configs) <= 10:
+                result += f"Configs:\n" + "\n".join(f"  - {c}" for c in controller_configs if c) + "\n\n"
+            else:
+                result += f"Configs (showing first 10 of {len(controller_configs)}):\n"
+                result += "\n".join(f"  - {c}" for c in controller_configs[:10] if c) + "\n"
+                result += f"  ... and {len(controller_configs) - 10} more\n\n"
+
+            # Format config template parameters as table instead of verbose dict
+            result += "Configuration Parameters:\n"
+            result += "parameter                    | type              | default\n"
+            result += "-" * 80 + "\n"
+
+            for param_name, param_info in template.items():
+                if param_name in ['id', 'controller_name', 'controller_type', 'candles_config', 'initial_positions']:
+                    continue  # Skip internal fields
+
+                param_type = str(param_info.get('type', 'unknown'))
+                # Simplify type names
+                param_type = param_type.replace("<class '", "").replace("'>", "").replace("decimal.Decimal", "Decimal")
+                param_type = param_type.replace("typing.", "").split(".")[-1][:15]
+
+                default = str(param_info.get('default', 'None'))
+                if len(default) > 30:
+                    default = default[:27] + "..."
+
+                result += f"{param_name:28} | {param_type:17} | {default}\n"
+
             return result
         else:
             return "Invalid action. Use 'list' or 'describe', or omit for overview."
