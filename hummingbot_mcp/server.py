@@ -167,6 +167,172 @@ def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
     return table
 
 
+def format_orders_as_table(orders: list[dict[str, Any]]) -> str:
+    """
+    Format orders as a table string for better LLM processing.
+
+    Columns: time | pair | side | type | amount | price | filled | status
+    """
+    if not orders:
+        return "No orders found."
+
+    from datetime import datetime
+
+    def format_timestamp(ts: Any) -> str:
+        """Format timestamp to readable format"""
+        try:
+            if isinstance(ts, (int, float)):
+                dt = datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts)
+            else:
+                dt = datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+            return dt.strftime("%m/%d %H:%M")
+        except:
+            return "N/A"
+
+    def format_number(num: Any) -> str:
+        """Format number compactly"""
+        if num is None or num == "N/A":
+            return "N/A"
+        try:
+            num_float = float(num)
+            if abs(num_float) < 0.01 and num_float != 0:
+                return f"{num_float:.4f}"
+            return f"{num_float:.2f}"
+        except (ValueError, TypeError):
+            return str(num)
+
+    # Header
+    header = "time        | pair          | side | type   | amount   | price    | filled   | status"
+    separator = "-" * 120
+
+    # Format each order as a row
+    rows = []
+    for order in orders:
+        time_str = format_timestamp(order.get("created_at") or order.get("creation_timestamp") or order.get("timestamp", 0))
+        pair = (order.get("trading_pair") or "N/A")[:12]
+        side = (order.get("trade_type") or order.get("side") or "N/A")[:4]
+        order_type = (order.get("order_type") or order.get("type") or "N/A")[:6]
+        amount = format_number(order.get("amount") or order.get("order_size"))
+        price = format_number(order.get("price"))
+        filled = format_number(order.get("filled_amount") or order.get("executed_amount_base"))
+        status = (order.get("status") or "N/A")[:8]
+
+        row = f"{time_str:11} | {pair:13} | {side:4} | {order_type:6} | {amount:8} | {price:8} | {filled:8} | {status}"
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
+def format_positions_as_table(positions: list[dict[str, Any]]) -> str:
+    """
+    Format positions as a table string for better LLM processing.
+
+    Columns: pair | side | amount | entry_price | current_price | unrealized_pnl | leverage
+    """
+    if not positions:
+        return "No positions found."
+
+    def format_number(num: Any) -> str:
+        """Format number compactly"""
+        if num is None or num == "N/A":
+            return "N/A"
+        try:
+            num_float = float(num)
+            if abs(num_float) < 0.01 and num_float != 0:
+                return f"{num_float:.4f}"
+            return f"{num_float:.2f}"
+        except (ValueError, TypeError):
+            return str(num)
+
+    # Header
+    header = "pair          | side  | amount   | entry_price | current_price | unrealized_pnl | leverage"
+    separator = "-" * 120
+
+    # Format each position as a row
+    rows = []
+    for position in positions:
+        pair = (position.get("trading_pair") or "N/A")[:12]
+        side = (position.get("position_side") or position.get("side") or "N/A")[:5]
+        amount = format_number(position.get("amount") or position.get("position_size"))
+        entry_price = format_number(position.get("entry_price"))
+        current_price = format_number(position.get("current_price") or position.get("mark_price"))
+        unrealized_pnl = format_number(position.get("unrealized_pnl"))
+        leverage = position.get("leverage") or "N/A"
+
+        row = f"{pair:13} | {side:5} | {amount:8} | {entry_price:11} | {current_price:13} | {unrealized_pnl:14} | {leverage}"
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
+def format_portfolio_as_table(portfolio_data: dict[str, Any]) -> str:
+    """
+    Format portfolio balances as a table string for better LLM processing.
+
+    Columns: token | connector | total | available | value_usd
+
+    Portfolio structure:
+    {
+      "account_name": {
+        "connector_name": [
+          {"token": "BTC", "units": 0.5, "available_units": 0.5, "value": 50000}
+        ]
+      }
+    }
+    """
+    if not portfolio_data:
+        return "No portfolio data found."
+
+    def format_number(num: Any) -> str:
+        """Format number compactly"""
+        if num is None or num == "N/A":
+            return "N/A"
+        try:
+            num_float = float(num)
+            if num_float >= 1000:
+                return f"{num_float/1000:.2f}K"
+            elif abs(num_float) < 0.01 and num_float != 0:
+                return f"{num_float:.6f}"
+            return f"{num_float:.4f}"
+        except (ValueError, TypeError):
+            return str(num)
+
+    # Header
+    header = "token    | connector         | total        | available    | value_usd"
+    separator = "-" * 100
+
+    # Flatten nested structure: account -> connector -> balances
+    rows = []
+    for account_name, connectors in portfolio_data.items():
+        if not isinstance(connectors, dict):
+            continue
+
+        for connector_name, balances in connectors.items():
+            if not isinstance(balances, list):
+                continue
+
+            for balance in balances:
+                token = (balance.get("token") or "N/A")[:8]
+                connector = connector_name[:17]
+                total = format_number(balance.get("units"))
+                available = format_number(balance.get("available_units"))
+                value_usd = format_number(balance.get("value"))
+
+                row = f"{token:8} | {connector:17} | {total:12} | {available:12} | {value_usd}"
+                rows.append(row)
+
+    if not rows:
+        return "No portfolio balances found."
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
 # Account Management Tools
 
 
@@ -382,9 +548,39 @@ async def get_portfolio_balances(
             # Get portfolio distribution
             result = await client.portfolio.get_distribution(account_names=account_names,
                                                              connector_names=connector_names)
+            # For distribution, we can keep it simple for now
             return f"Portfolio Distribution: {result}"
-        account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
-        return f"Account State: {account_info}"
+
+        # Get portfolio state
+        result = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
+
+        # Debug: Check the actual structure
+        if not result or not isinstance(result, dict):
+            return f"Error: Unexpected portfolio response format. Type: {type(result)}"
+
+        # Format portfolio as table for better readability
+        portfolio_table = format_portfolio_as_table(result)
+
+        # Calculate total value from nested structure: account -> connector -> balances
+        total_value = 0.0
+        for account_name, connectors in result.items():
+            if not isinstance(connectors, dict):
+                continue
+            for connector_name, balances in connectors.items():
+                if not isinstance(balances, list):
+                    continue
+                for balance in balances:
+                    value = balance.get("value", 0)
+                    if value:
+                        total_value += float(value)
+
+        summary = (
+            f"Portfolio Balances:\n"
+            f"Total Value (USD): ${total_value:.2f}\n\n"
+            f"{portfolio_table}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -533,7 +729,27 @@ async def get_orders(
             limit=limit,
             cursor=cursor,
         )
-        return f"Order Management Result: {result}"
+
+        # Format orders as table for better readability
+        orders = result.get("data", [])
+        orders_table = format_orders_as_table(orders)
+
+        pagination = result.get("pagination", {})
+        total_orders = pagination.get("total_count", len(orders))
+        has_more = pagination.get("has_more", False)
+        next_cursor = pagination.get("next_cursor")
+
+        summary = (
+            f"Orders Search Result:\n"
+            f"Total Orders Returned: {len(orders)}\n"
+            f"Total Count: {total_orders}\n"
+            f"Status Filter: {status if status else 'All'}\n"
+            f"Has More: {has_more}\n"
+            f"Next Cursor: {next_cursor if next_cursor else 'None'}\n\n"
+            f"{orders_table}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -557,7 +773,20 @@ async def get_positions(
         client = await hummingbot_client.get_client()
         result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
                                                     limit=limit)
-        return f"Position Management Result: {result}"
+
+        # Format positions as table for better readability
+        positions = result.get("positions", [])
+        positions_table = format_positions_as_table(positions)
+
+        total_positions = len(positions)
+
+        summary = (
+            f"Positions Result:\n"
+            f"Total Positions: {total_positions}\n\n"
+            f"{positions_table}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -1351,6 +1580,22 @@ async def manage_gateway_swaps(
         from .tools.gateway_swap import manage_gateway_swaps as manage_gateway_swaps_impl
 
         result = await manage_gateway_swaps_impl(request)
+
+        # Format search results with pagination info
+        if action == "search" and isinstance(result, dict):
+            filters = result.get("filters", {})
+            pagination = result.get("pagination", {})
+            swaps = result.get("result", {}).get("swaps", [])
+
+            summary = (
+                f"Gateway Swaps Search Result:\n"
+                f"Total Swaps Found: {len(swaps)}\n"
+                f"Limit: {pagination.get('limit', 'N/A')}, Offset: {pagination.get('offset', 'N/A')}\n"
+                f"Filters: {filters if filters else 'None'}\n\n"
+                f"Swaps: {swaps}"
+            )
+            return summary
+
         return f"Gateway Swap Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_swaps failed: {str(e)}", exc_info=True)
@@ -1526,6 +1771,22 @@ async def manage_gateway_clmm_positions(
         from .tools.gateway_clmm import manage_gateway_clmm_positions as manage_gateway_clmm_positions_impl
 
         result = await manage_gateway_clmm_positions_impl(request)
+
+        # Format search_positions results with pagination info
+        if action == "search_positions" and isinstance(result, dict):
+            filters = result.get("filters", {})
+            pagination = result.get("pagination", {})
+            positions = result.get("result", {}).get("positions", [])
+
+            summary = (
+                f"Gateway CLMM Positions Search Result:\n"
+                f"Total Positions Found: {len(positions)}\n"
+                f"Limit: {pagination.get('limit', 'N/A')}, Offset: {pagination.get('offset', 'N/A')}\n"
+                f"Filters: {filters if filters else 'None'}\n\n"
+                f"Positions: {positions}"
+            )
+            return summary
+
         return f"Gateway CLMM Position Management Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_clmm_positions failed: {str(e)}", exc_info=True)
