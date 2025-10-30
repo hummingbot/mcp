@@ -13,8 +13,17 @@ from mcp.server.fastmcp import FastMCP
 
 from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
+from hummingbot_mcp.formatters import (
+    format_active_bots_as_table,
+    format_bot_logs_as_table,
+    format_portfolio_as_table,
+)
 from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
+from hummingbot_mcp.tools import bot_management as bot_management_tools
+from hummingbot_mcp.tools import controllers as controllers_tools
+from hummingbot_mcp.tools import market_data as market_data_tools
+from hummingbot_mcp.tools import trading as trading_tools
 from hummingbot_mcp.tools.account import SetupConnectorRequest
 from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
 from hummingbot_mcp.tools.gateway_swap import GatewaySwapRequest
@@ -30,428 +39,6 @@ logger = logging.getLogger("hummingbot-mcp")
 
 # Initialize FastMCP server
 mcp = FastMCP("hummingbot-mcp")
-
-
-# Helper Functions
-
-def format_bot_logs_as_table(logs: list[dict[str, Any]]) -> str:
-    """
-    Format bot logs as a table string for better LLM processing.
-
-    Columns: time | level | category | message
-    """
-    if not logs:
-        return "No logs found."
-
-    from datetime import datetime
-
-    def format_timestamp(ts: float) -> str:
-        """Format unix timestamp to readable time"""
-        try:
-            dt = datetime.fromtimestamp(ts)
-            return dt.strftime("%H:%M:%S")
-        except:
-            return "N/A"
-
-    def truncate_message(msg: str, max_len: int = 80) -> str:
-        """Truncate message if too long"""
-        if len(msg) <= max_len:
-            return msg
-        return msg[:max_len-3] + "..."
-
-    # Header
-    header = "time     | level | category | message"
-    separator = "-" * 120
-
-    # Format each log as a row
-    rows = []
-    for log_entry in logs:
-        time_str = format_timestamp(log_entry.get("timestamp", 0))
-        level = log_entry.get("level_name", "INFO")[:4]  # Truncate to 4 chars (INFO, WARN, ERR)
-        category = log_entry.get("log_category", "gen")[:3]  # gen or err
-        message = truncate_message(log_entry.get("msg", ""))
-
-        row = f"{time_str} | {level:4} | {category:3} | {message}"
-        rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
-    """
-    Format active bots data as a table string for better LLM processing.
-
-    Columns: bot_name | controller | status | realized_pnl | unrealized_pnl | global_pnl | volume | errors
-    """
-    if not bots_data or "data" not in bots_data or not bots_data["data"]:
-        return "No active bots found."
-
-    def format_number(num: Any) -> str:
-        """Format number to be more compact"""
-        if num is None or num == "N/A":
-            return "N/A"
-        try:
-            num_float = float(num)
-            if abs(num_float) < 0.01 and num_float != 0:
-                return f"{num_float:.4f}"
-            return f"{num_float:.2f}"
-        except (ValueError, TypeError):
-            return str(num)
-
-    def format_pct(pct: Any) -> str:
-        """Format percentage"""
-        if pct is None or pct == "N/A":
-            return "N/A"
-        try:
-            return f"{float(pct) * 100:.2f}%"
-        except (ValueError, TypeError):
-            return str(pct)
-
-    # Header
-    header = "bot_name | controller | status | realized_pnl | unrealized_pnl | global_pnl | volume | errors | recent_logs"
-    separator = "-" * 120
-
-    # Format each bot as rows
-    rows = []
-    for bot_name, bot_data in bots_data["data"].items():
-        if not isinstance(bot_data, dict):
-            continue
-
-        bot_status = bot_data.get("status", "unknown")
-        error_count = len(bot_data.get("error_logs", []))
-        log_count = len(bot_data.get("general_logs", []))
-
-        # Get controller performance data
-        performance = bot_data.get("performance", {})
-
-        if not performance:
-            # Bot with no controllers
-            row = (
-                f"{bot_name[:20]} | "
-                f"N/A | "
-                f"{bot_status} | "
-                f"N/A | N/A | N/A | N/A | "
-                f"{error_count} | "
-                f"{log_count}"
-            )
-            rows.append(row)
-        else:
-            # Bot with controllers
-            for controller_name, controller_data in performance.items():
-                ctrl_status = controller_data.get("status", "unknown")
-                ctrl_perf = controller_data.get("performance", {})
-
-                realized_pnl = format_number(ctrl_perf.get("realized_pnl_quote"))
-                unrealized_pnl = format_number(ctrl_perf.get("unrealized_pnl_quote"))
-                global_pnl = format_number(ctrl_perf.get("global_pnl_quote"))
-                global_pnl_pct = format_pct(ctrl_perf.get("global_pnl_pct"))
-                volume = format_number(ctrl_perf.get("volume_traded"))
-
-                row = (
-                    f"{bot_name[:20]} | "
-                    f"{controller_name[:20]} | "
-                    f"{ctrl_status} | "
-                    f"{realized_pnl} | "
-                    f"{unrealized_pnl} | "
-                    f"{global_pnl} ({global_pnl_pct}) | "
-                    f"{volume} | "
-                    f"{error_count} | "
-                    f"{log_count}"
-                )
-                rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_orders_as_table(orders: list[dict[str, Any]]) -> str:
-    """
-    Format orders as a table string for better LLM processing.
-
-    Columns: time | pair | side | type | amount | price | filled | status
-    """
-    if not orders:
-        return "No orders found."
-
-    from datetime import datetime
-
-    def format_timestamp(ts: Any) -> str:
-        """Format timestamp to readable format"""
-        try:
-            if isinstance(ts, (int, float)):
-                dt = datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts)
-            else:
-                dt = datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
-            return dt.strftime("%m/%d %H:%M")
-        except:
-            return "N/A"
-
-    def format_number(num: Any) -> str:
-        """Format number compactly"""
-        if num is None or num == "N/A":
-            return "N/A"
-        try:
-            num_float = float(num)
-            if abs(num_float) < 0.01 and num_float != 0:
-                return f"{num_float:.4f}"
-            return f"{num_float:.2f}"
-        except (ValueError, TypeError):
-            return str(num)
-
-    # Header
-    header = "time        | pair          | side | type   | amount   | price    | filled   | status"
-    separator = "-" * 120
-
-    # Format each order as a row
-    rows = []
-    for order in orders:
-        time_str = format_timestamp(order.get("created_at") or order.get("creation_timestamp") or order.get("timestamp", 0))
-        pair = (order.get("trading_pair") or "N/A")[:12]
-        side = (order.get("trade_type") or order.get("side") or "N/A")[:4]
-        order_type = (order.get("order_type") or order.get("type") or "N/A")[:6]
-        amount = format_number(order.get("amount") or order.get("order_size"))
-        price = format_number(order.get("price"))
-        filled = format_number(order.get("filled_amount") or order.get("executed_amount_base"))
-        status = (order.get("status") or "N/A")[:8]
-
-        row = f"{time_str:11} | {pair:13} | {side:4} | {order_type:6} | {amount:8} | {price:8} | {filled:8} | {status}"
-        rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_positions_as_table(positions: list[dict[str, Any]]) -> str:
-    """
-    Format positions as a table string for better LLM processing.
-
-    Columns: pair | side | amount | entry_price | current_price | unrealized_pnl | leverage
-    """
-    if not positions:
-        return "No positions found."
-
-    def format_number(num: Any) -> str:
-        """Format number compactly"""
-        if num is None or num == "N/A":
-            return "N/A"
-        try:
-            num_float = float(num)
-            if abs(num_float) < 0.01 and num_float != 0:
-                return f"{num_float:.4f}"
-            return f"{num_float:.2f}"
-        except (ValueError, TypeError):
-            return str(num)
-
-    # Header
-    header = "pair          | side  | amount   | entry_price | current_price | unrealized_pnl | leverage"
-    separator = "-" * 120
-
-    # Format each position as a row
-    rows = []
-    for position in positions:
-        pair = (position.get("trading_pair") or "N/A")[:12]
-        side = (position.get("position_side") or position.get("side") or "N/A")[:5]
-        amount = format_number(position.get("amount") or position.get("position_size"))
-        entry_price = format_number(position.get("entry_price"))
-        current_price = format_number(position.get("current_price") or position.get("mark_price"))
-        unrealized_pnl = format_number(position.get("unrealized_pnl"))
-        leverage = position.get("leverage") or "N/A"
-
-        row = f"{pair:13} | {side:5} | {amount:8} | {entry_price:11} | {current_price:13} | {unrealized_pnl:14} | {leverage}"
-        rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_prices_as_table(prices_data: dict[str, Any]) -> str:
-    """
-    Format prices data as a table string for better LLM processing.
-    Columns: trading_pair | price
-    """
-    prices = prices_data.get("prices", {})
-
-    if not prices:
-        return "No prices available."
-
-    # Header
-    header = "trading_pair      | price"
-    separator = "-" * 50
-
-    # Format each price as a row
-    rows = []
-    for pair, price in prices.items():
-        pair_str = pair[:16].ljust(16)
-        price_str = f"${price:,.2f}" if price >= 1 else f"${price:.6f}"
-        row = f"{pair_str}  | {price_str}"
-        rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_candles_as_table(candles: list[dict[str, Any]]) -> str:
-    """
-    Format candle data as a table string for better LLM processing.
-    Columns: time | open | high | low | close | volume
-    """
-    if not candles:
-        return "No candles found."
-
-    from datetime import datetime
-
-    def format_timestamp(ts: float) -> str:
-        """Format unix timestamp to readable datetime"""
-        try:
-            dt = datetime.fromtimestamp(ts)
-            return dt.strftime("%m/%d %H:%M")
-        except:
-            return "N/A"
-
-    def format_price(price: Any) -> str:
-        """Format price"""
-        try:
-            return f"{float(price):.2f}"
-        except:
-            return "N/A"
-
-    def format_volume(vol: Any) -> str:
-        """Format volume compactly"""
-        try:
-            vol_float = float(vol)
-            if vol_float >= 1_000_000:
-                return f"{vol_float/1_000_000:.2f}M"
-            elif vol_float >= 1_000:
-                return f"{vol_float/1_000:.2f}K"
-            else:
-                return f"{vol_float:.2f}"
-        except:
-            return "N/A"
-
-    # Header
-    header = "time        | open     | high     | low      | close    | volume"
-    separator = "-" * 85
-
-    # Format each candle as a row
-    rows = []
-    for candle in candles:
-        time_str = format_timestamp(candle.get("timestamp", 0))
-        open_price = format_price(candle.get("open"))
-        high_price = format_price(candle.get("high"))
-        low_price = format_price(candle.get("low"))
-        close_price = format_price(candle.get("close"))
-        volume = format_volume(candle.get("volume"))
-
-        row = f"{time_str:11} | {open_price:8} | {high_price:8} | {low_price:8} | {close_price:8} | {volume}"
-        rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_order_book_as_table(order_book_data: dict[str, Any]) -> str:
-    """
-    Format order book snapshot as a table string for better LLM processing.
-    Shows top 10 bids and asks side by side.
-    """
-    bids = order_book_data.get("bids", [])[:10]
-    asks = order_book_data.get("asks", [])[:10]
-
-    if not bids and not asks:
-        return "No order book data available."
-
-    # Header
-    header = "BIDS                      |  ASKS"
-    sub_header = "price      | amount       |  price      | amount"
-    separator = "-" * 65
-
-    # Format rows
-    rows = []
-    max_rows = max(len(bids), len(asks))
-
-    for i in range(max_rows):
-        bid_price = f"{bids[i]['price']:10.2f}" if i < len(bids) else " " * 10
-        bid_amount = f"{bids[i]['amount']:12.3f}" if i < len(bids) else " " * 12
-        ask_price = f"{asks[i]['price']:10.2f}" if i < len(asks) else " " * 10
-        ask_amount = f"{asks[i]['amount']:12.3f}" if i < len(asks) else " " * 12
-
-        row = f"{bid_price} | {bid_amount} |  {ask_price} | {ask_amount}"
-        rows.append(row)
-
-    # Combine everything
-    table = f"{header}\n{sub_header}\n{separator}\n" + "\n".join(rows)
-    return table
-
-
-def format_portfolio_as_table(portfolio_data: dict[str, Any]) -> str:
-    """
-    Format portfolio balances as a table string for better LLM processing.
-
-    Columns: token | connector | total | available | value_usd
-
-    Portfolio structure:
-    {
-      "account_name": {
-        "connector_name": [
-          {"token": "BTC", "units": 0.5, "available_units": 0.5, "value": 50000}
-        ]
-      }
-    }
-    """
-    if not portfolio_data:
-        return "No portfolio data found."
-
-    def format_number(num: Any) -> str:
-        """Format number compactly"""
-        if num is None or num == "N/A":
-            return "N/A"
-        try:
-            num_float = float(num)
-            if num_float >= 1000:
-                return f"{num_float/1000:.2f}K"
-            elif abs(num_float) < 0.01 and num_float != 0:
-                return f"{num_float:.6f}"
-            return f"{num_float:.4f}"
-        except (ValueError, TypeError):
-            return str(num)
-
-    # Header
-    header = "token    | connector         | total        | available    | value_usd"
-    separator = "-" * 100
-
-    # Flatten nested structure: account -> connector -> balances
-    rows = []
-    for account_name, connectors in portfolio_data.items():
-        if not isinstance(connectors, dict):
-            continue
-
-        for connector_name, balances in connectors.items():
-            if not isinstance(balances, list):
-                continue
-
-            for balance in balances:
-                token = (balance.get("token") or "N/A")[:8]
-                connector = connector_name[:17]
-                total = format_number(balance.get("units"))
-                available = format_number(balance.get("available_units"))
-                value_usd = format_number(balance.get("value"))
-
-                row = f"{token:8} | {connector:17} | {total:12} | {available:12} | {value_usd}"
-                rows.append(row)
-
-    if not rows:
-        return "No portfolio balances found."
-
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
 
 
 # Account Management Tools
@@ -809,14 +396,8 @@ async def place_order(
     """
     try:
         client = await hummingbot_client.get_client()
-        if "$" in amount and price is None:
-            prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pair)
-            price = prices["prices"][trading_pair]
-            amount = float(amount.replace("$", "")) / price
-        else:
-            amount = float(amount)
-        result = await client.trading.place_order(
-            account_name=account_name,
+        result = await trading_tools.place_order(
+            client=client,
             connector_name=connector_name,
             trading_pair=trading_pair,
             trade_type=trade_type,
@@ -824,8 +405,9 @@ async def place_order(
             order_type=order_type,
             price=price,
             position_action=position_action,
+            account_name=account_name,
         )
-        return f"Order Result: {result}"
+        return f"Order Result: {result['result']}"
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -852,30 +434,24 @@ async def set_account_position_mode_and_leverage(
         position_mode: Position mode ('HEDGE' or 'ONE-WAY')
         leverage: Leverage to set (optional, required for HEDGE mode)
     """
-
     try:
         client = await hummingbot_client.get_client()
-        if position_mode is None and leverage is None:
-            raise ValueError("At least one of position_mode or leverage must be specified")
+        results = await trading_tools.set_position_mode_and_leverage(
+            client=client,
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            position_mode=position_mode,
+            leverage=leverage,
+        )
+
         response = ""
-        if position_mode:
-            position_mode = position_mode.upper()
-            if position_mode not in ["HEDGE", "ONE-WAY"]:
-                raise ValueError("Invalid position mode. Must be 'HEDGE' or 'ONE-WAY'")
-            position_mode_result = await client.trading.set_position_mode(
-                account_name=account_name, connector_name=connector_name, position_mode=position_mode
-            )
-            response += f"Position Mode Set: {position_mode_result}\n"
-        if leverage is not None:
-            if not isinstance(leverage, int) or leverage <= 0:
-                raise ValueError("Leverage must be a positive integer")
-            if trading_pair is None:
-                raise ValueError("Trading_pair must be specified")
-            leverage_result = await client.trading.set_leverage(
-                account_name=account_name, connector_name=connector_name, trading_pair=trading_pair, leverage=leverage
-            )
-            response += f"Leverage Set: {leverage_result}\n"
-        return f"{response.strip()}"
+        if "position_mode" in results:
+            response += f"Position Mode Set: {results['position_mode']}\n"
+        if "leverage" in results:
+            response += f"Leverage Set: {results['leverage']}\n"
+
+        return response.strip()
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -907,10 +483,10 @@ async def get_orders(
         limit: Number of orders to return defaults to 500, maximum is 1000.
         cursor: Cursor for pagination (optional, should be used if another request returned a cursor).
     """
-
     try:
         client = await hummingbot_client.get_client()
-        result = await client.trading.search_orders(
+        result = await trading_tools.search_orders(
+            client=client,
             account_names=account_names,
             connector_names=connector_names,
             trading_pairs=trading_pairs,
@@ -921,23 +497,15 @@ async def get_orders(
             cursor=cursor,
         )
 
-        # Format orders as table for better readability
-        orders = result.get("data", [])
-        orders_table = format_orders_as_table(orders)
-
-        pagination = result.get("pagination", {})
-        total_orders = pagination.get("total_count", len(orders))
-        has_more = pagination.get("has_more", False)
-        next_cursor = pagination.get("next_cursor")
-
+        pagination = result["pagination"]
         summary = (
             f"Orders Search Result:\n"
-            f"Total Orders Returned: {len(orders)}\n"
-            f"Total Count: {total_orders}\n"
-            f"Status Filter: {status if status else 'All'}\n"
-            f"Has More: {has_more}\n"
-            f"Next Cursor: {next_cursor if next_cursor else 'None'}\n\n"
-            f"{orders_table}"
+            f"Total Orders Returned: {result['total_returned']}\n"
+            f"Total Count: {pagination.get('total_count', result['total_returned'])}\n"
+            f"Status Filter: {result['status_filter'] if result['status_filter'] else 'All'}\n"
+            f"Has More: {pagination.get('has_more', False)}\n"
+            f"Next Cursor: {pagination.get('next_cursor') if pagination.get('next_cursor') else 'None'}\n\n"
+            f"{result['orders_table']}"
         )
 
         return summary
@@ -962,19 +530,17 @@ async def get_positions(
     """
     try:
         client = await hummingbot_client.get_client()
-        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
-                                                    limit=limit)
-
-        # Format positions as table for better readability
-        positions = result.get("positions", [])
-        positions_table = format_positions_as_table(positions)
-
-        total_positions = len(positions)
+        result = await trading_tools.get_positions(
+            client=client,
+            account_names=account_names,
+            connector_names=connector_names,
+            limit=limit,
+        )
 
         summary = (
             f"Positions Result:\n"
-            f"Total Positions: {total_positions}\n\n"
-            f"{positions_table}"
+            f"Total Positions: {result['total_positions']}\n\n"
+            f"{result['positions_table']}"
         )
 
         return summary
@@ -998,19 +564,16 @@ async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
     """
     try:
         client = await hummingbot_client.get_client()
-        prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pairs)
-
-        # Format prices as table for better readability
-        prices_table = format_prices_as_table(prices)
-
-        from datetime import datetime
-        timestamp = prices.get("timestamp", 0)
-        time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "N/A"
+        result = await market_data_tools.get_prices(
+            client=client,
+            connector_name=connector_name,
+            trading_pairs=trading_pairs,
+        )
 
         summary = (
-            f"Latest Prices for {connector_name}:\n"
-            f"Timestamp: {time_str}\n\n"
-            f"{prices_table}"
+            f"Latest Prices for {result['connector_name']}:\n"
+            f"Timestamp: {result['timestamp']}\n\n"
+            f"{result['prices_table']}"
         )
 
         return summary
@@ -1033,37 +596,19 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
     """
     try:
         client = await hummingbot_client.get_client()
-        available_candles_connectors = await client.market_data.get_available_candle_connectors()
-        if connector_name not in available_candles_connectors:
-            raise ValueError(
-                f"Connector '{connector_name}' does not support candle data. Available connectors: {available_candles_connectors}"
-            )
-        # Determine max records based on interval "m" is minute, "s" is second, "h" is hour, "d" is day, "w" is week
-        if interval.endswith("m"):
-            max_records = 1440 * days  # 1440 minutes in a day
-        elif interval.endswith("h"):
-            max_records = 24 * days
-        elif interval.endswith("d"):
-            max_records = days
-        elif interval.endswith("w"):
-            max_records = 7 * days
-        else:
-            raise ValueError(
-                f"Unsupported interval format: {interval}. Use '1m', '5m', '15m', '30m', '1h', '4h', '1d', or '1w'.")
-        max_records = int(max_records / int(interval[:-1])) if interval[:-1] else max_records
-
-        candles = await client.market_data.get_candles(
-            connector_name=connector_name, trading_pair=trading_pair, interval=interval, max_records=max_records
+        result = await market_data_tools.get_candles(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            interval=interval,
+            days=days,
         )
 
-        # Format candles as table for better readability
-        candles_table = format_candles_as_table(candles)
-
         summary = (
-            f"Candles for {trading_pair} on {connector_name}:\n"
-            f"Interval: {interval}\n"
-            f"Total Candles: {len(candles)}\n\n"
-            f"{candles_table}"
+            f"Candles for {result['trading_pair']} on {result['connector_name']}:\n"
+            f"Interval: {result['interval']}\n"
+            f"Total Candles: {result['total_candles']}\n\n"
+            f"{result['candles_table']}"
         )
 
         return summary
@@ -1085,28 +630,18 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
     """
     try:
         client = await hummingbot_client.get_client()
-        if "_perpetual" not in connector_name:
-            raise ValueError(
-                f"Connector '{connector_name}' is not a perpetual connector. Funding rates are only available for"
-                f"perpetual connectors."
-            )
-        funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
-                                                                 trading_pair=trading_pair)
-
-        # Format funding rate as clean text
-        from datetime import datetime
-        next_funding_time = funding_rate.get("next_funding_time", 0)
-        time_str = datetime.fromtimestamp(next_funding_time).strftime("%Y-%m-%d %H:%M:%S") if next_funding_time else "N/A"
-
-        rate = funding_rate.get("funding_rate", 0)
-        rate_pct = rate * 100  # Convert to percentage
+        result = await market_data_tools.get_funding_rate(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+        )
 
         summary = (
-            f"Funding Rate for {trading_pair} on {connector_name}:\n\n"
-            f"Funding Rate: {rate_pct:.4f}%\n"
-            f"Mark Price: ${funding_rate.get('mark_price', 0):.2f}\n"
-            f"Index Price: ${funding_rate.get('index_price', 0):.2f}\n"
-            f"Next Funding Time: {time_str}"
+            f"Funding Rate for {result['trading_pair']} on {result['connector_name']}:\n\n"
+            f"Funding Rate: {result['funding_rate_pct']:.4f}%\n"
+            f"Mark Price: ${result['mark_price']:.2f}\n"
+            f"Index Price: ${result['index_price']:.2f}\n"
+            f"Next Funding Time: {result['next_funding_time']}"
         )
 
         return summary
@@ -1139,57 +674,32 @@ async def get_order_book(
     """
     try:
         client = await hummingbot_client.get_client()
-        if query_type == "snapshot":
-            order_book = await client.market_data.get_order_book(connector_name=connector_name,
-                                                                 trading_pair=trading_pair)
+        result = await market_data_tools.get_order_book(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            query_type=query_type,
+            query_value=query_value,
+            is_buy=is_buy,
+        )
 
-            # Format order book as table for better readability
-            order_book_table = format_order_book_as_table(order_book)
-
-            from datetime import datetime
-            timestamp = order_book.get("timestamp", 0)
-            time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "N/A"
-
+        # Format response based on query type
+        if result["query_type"] == "snapshot":
             summary = (
-                f"Order Book Snapshot for {trading_pair} on {connector_name}:\n"
-                f"Timestamp: {time_str}\n"
+                f"Order Book Snapshot for {result['trading_pair']} on {result['connector_name']}:\n"
+                f"Timestamp: {result['timestamp']}\n"
                 f"Top 10 Levels:\n\n"
-                f"{order_book_table}"
+                f"{result['order_book_table']}"
             )
-
-            return summary
         else:
-            if query_value is None:
-                raise ValueError(f"query_value must be provided for query_type '{query_type}'")
-            if query_type == "volume_for_price":
-                result = await client.market_data.get_volume_for_price(
-                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
-                )
-            elif query_type == "price_for_volume":
-                result = await client.market_data.get_price_for_volume(
-                    connector_name=connector_name, trading_pair=trading_pair, volume=query_value, is_buy=is_buy
-                )
-            elif query_type == "quote_volume_for_price":
-                result = await client.market_data.get_quote_volume_for_price(
-                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
-                )
-            elif query_type == "price_for_quote_volume":
-                result = await client.market_data.get_price_for_quote_volume(
-                    connector_name=connector_name, trading_pair=trading_pair, quote_volume=query_value, is_buy=is_buy
-                )
-            else:
-                raise ValueError(f"Unsupported query type: {query_type}")
-
-            # Format query results as clean text
-            side_str = "BUY" if is_buy else "SELL"
             summary = (
-                f"Order Book Query for {trading_pair} on {connector_name}:\n\n"
-                f"Query Type: {query_type}\n"
-                f"Query Value: {query_value}\n"
-                f"Side: {side_str}\n"
-                f"Result: {result}"
+                f"Order Book Query for {result['trading_pair']} on {result['connector_name']}:\n\n"
+                f"Query Type: {result['query_type']}\n"
+                f"Query Value: {result['query_value']}\n"
+                f"Side: {result['side']}\n"
+                f"Result: {result['result']}"
             )
-            return summary
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -1244,81 +754,14 @@ async def explore_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-        # List all controllers and their configs
-        controllers = await client.controllers.list_controllers()
-        configs = await client.controllers.list_controller_configs()
-        result = ""
-        if action == "list":
-            result = "Available Controllers:\n\n"
-            for c_type, controllers in controllers.items():
-                if controller_type is not None and c_type != controller_type:
-                    continue
-                result += f"Controller Type: {c_type}\n"
-                for controller in controllers:
-                    controller_configs = [c for c in configs if c.get('controller_name') == controller]
-                    result += f"- {controller} ({len(controller_configs)} configs)\n"
-                    if len(controller_configs) > 0:
-                        for config in controller_configs:
-                            result += f"    - {config.get('id', 'unknown')}\n"
-            return result
-        elif action == "describe":
-            config = await client.controllers.get_controller_config(config_name) if config_name else None
-            if config:
-                if controller_name != config.get("controller_name"):
-                    controller_name = config.get("controller_name")
-                    result += f"Controller name not matching, using config's controller name: {controller_name}\n"
-                result += f"Config Details for {config_name}:\n{config}\n\n"
-            if not controller_name:
-                return "Please provide a controller name to describe."
-            # First, determine the controller type
-            controller_type = None
-            for c_type, controllers in controllers.items():
-                if controller_name in controllers:
-                    controller_type = c_type
-                    break
-            if not controller_type:
-                return f"Controller '{controller_name}' not found."
-            # Get controller code and configs
-            controller_code = await client.controllers.get_controller(controller_type, controller_name)
-            controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
-            template = await client.controllers.get_controller_config_template(controller_type, controller_name)
-
-            result += f"Controller: {controller_name} ({controller_type})\n\n"
-            result += f"Controller Code:\n{controller_code}\n\n"
-
-            # Format configs list more compactly
-            result += f"Total Configs Available: {len(controller_configs)}\n"
-            # Show first 10 configs, or all if less than 10
-            if len(controller_configs) <= 10:
-                result += f"Configs:\n" + "\n".join(f"  - {c}" for c in controller_configs if c) + "\n\n"
-            else:
-                result += f"Configs (showing first 10 of {len(controller_configs)}):\n"
-                result += "\n".join(f"  - {c}" for c in controller_configs[:10] if c) + "\n"
-                result += f"  ... and {len(controller_configs) - 10} more\n\n"
-
-            # Format config template parameters as table instead of verbose dict
-            result += "Configuration Parameters:\n"
-            result += "parameter                    | type              | default\n"
-            result += "-" * 80 + "\n"
-
-            for param_name, param_info in template.items():
-                if param_name in ['id', 'controller_name', 'controller_type', 'candles_config', 'initial_positions']:
-                    continue  # Skip internal fields
-
-                param_type = str(param_info.get('type', 'unknown'))
-                # Simplify type names
-                param_type = param_type.replace("<class '", "").replace("'>", "").replace("decimal.Decimal", "Decimal")
-                param_type = param_type.replace("typing.", "").split(".")[-1][:15]
-
-                default = str(param_info.get('default', 'None'))
-                if len(default) > 30:
-                    default = default[:27] + "..."
-
-                result += f"{param_name:28} | {param_type:17} | {default}\n"
-
-            return result
-        else:
-            return "Invalid action. Use 'list' or 'describe', or omit for overview."
+        result = await controllers_tools.explore_controllers(
+            client=client,
+            action=action,
+            controller_type=controller_type,
+            controller_name=controller_name,
+            config_name=config_name,
+        )
+        return result["formatted_output"]
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -1372,89 +815,19 @@ async def modify_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-
-        if target == "controller":
-            if action == "upsert":
-                if not controller_type or not controller_name or not controller_code:
-                    raise ValueError("controller_type, controller_name, and controller_code are required for controller upsert")
-
-                # Check if controller exists
-                controllers = await client.controllers.list_controllers()
-                exists = controller_name in controllers.get(controller_type, [])
-
-                if exists and not confirm_override:
-                    controller_code = await client.controllers.get_controller(controller_type, controller_name)
-                    return (f"Controller '{controller_name}' already exists and this is the current code: {controller_code}. "
-                            f"Set confirm_override=True to update it.")
-
-                result = await client.controllers.create_or_update_controller(
-                    controller_type, controller_name, controller_code
-                )
-                return f"Controller {'updated' if exists else 'created'}: {result}"
-
-            elif action == "delete":
-                if not controller_type or not controller_name:
-                    raise ValueError("controller_type and controller_name are required for controller delete")
-
-                result = await client.controllers.delete_controller(controller_type, controller_name)
-                return f"Controller deleted: {result}"
-
-        elif target == "config":
-            if action == "upsert":
-                if not config_name or not config_data:
-                    raise ValueError("config_name and config_data are required for config upsert")
-
-                # Extract controller_type and controller_name from config_data
-                config_controller_type = config_data.get("controller_type")
-                config_controller_name = config_data.get("controller_name")
-
-                if not config_controller_type or not config_controller_name:
-                    raise ValueError("config_data must include 'controller_type' and 'controller_name'")
-
-                # validate config first
-                await client.controllers.validate_controller_config(config_controller_type, config_controller_name, config_data)
-
-                if bot_name:
-                    if not confirm_override:
-                        current_configs = await client.controllers.get_bot_controller_configs(bot_name)
-                        config = next((c for c in current_configs if c.get("id") == config_name), None)
-                        if config:
-                            return (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
-                                    "Set confirm_override=True to update it.")
-                        else:
-                            update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
-                            return f"Config created in bot '{bot_name}': {update_op}"
-                    else:
-                        # Ensure config_data has the correct id
-                        if "id" not in config_data or config_data["id"] != config_name:
-                            config_data["id"] = config_name
-                        update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
-                        return f"Config updated in bot '{bot_name}': {update_op}"
-                else:
-                    # Ensure config_data has the correct id
-                    if "id" not in config_data or config_data["id"] != config_name:
-                        config_data["id"] = config_name
-
-                    controller_configs = await client.controllers.list_controller_configs()
-                    exists = config_name in controller_configs
-
-                    if exists and not confirm_override:
-                        existing_config = await client.controllers.get_controller_config(config_name)
-                        return (f"Config '{config_name}' already exists with data: {existing_config}."
-                                "Set confirm_override=True to update it.")
-
-                    result = await client.controllers.create_or_update_controller_config(config_name, config_data)
-                    return f"Config {'updated' if exists else 'created'}: {result}"
-
-            elif action == "delete":
-                if not config_name:
-                    raise ValueError("config_name is required for config delete")
-
-                result = await client.controllers.delete_controller_config(config_name)
-                await client.bot_orchestration.deploy_v2_controllers()
-                return f"Config deleted: {result}"
-        else:
-            raise ValueError("Invalid target. Must be 'controller' or 'config'.")
+        result = await controllers_tools.modify_controllers(
+            client=client,
+            action=action,
+            target=target,
+            controller_type=controller_type,
+            controller_name=controller_name,
+            controller_code=controller_code,
+            config_name=config_name,
+            config_data=config_data,
+            bot_name=bot_name,
+            confirm_override=confirm_override,
+        )
+        return result["message"]
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -1485,16 +858,16 @@ async def deploy_bot_with_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-        # Validate controller configs
-        result = await client.bot_orchestration.deploy_v2_controllers(
-            instance_name=bot_name,
+        result = await controllers_tools.deploy_bot(
+            client=client,
+            bot_name=bot_name,
             controllers_config=controllers_config,
-            credentials_profile=account_name,
+            account_name=account_name,
             max_global_drawdown_quote=max_global_drawdown_quote,
             max_controller_drawdown_quote=max_controller_drawdown_quote,
             image=image,
         )
-        return f"Bot Deployment Result: {result}"
+        return result["message"]
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -1509,29 +882,12 @@ async def get_active_bots_status():
     """
     try:
         client = await hummingbot_client.get_client()
-        active_bots = await client.bot_orchestration.get_active_bots_status()
-
-        # Limit logs to last 5 entries for each bot to reduce output size
-        if isinstance(active_bots, dict) and "data" in active_bots:
-            for bot_name, bot_data in active_bots["data"].items():
-                if isinstance(bot_data, dict):
-                    # Keep only the last 5 error logs
-                    if "error_logs" in bot_data:
-                        bot_data["error_logs"] = bot_data["error_logs"][-5:]
-                    # Keep only the last 5 general logs
-                    if "general_logs" in bot_data:
-                        bot_data["general_logs"] = bot_data["general_logs"][-5:]
-
-        # Format as table for better readability
-        bots_table = format_active_bots_as_table(active_bots)
-
-        # Count total bots
-        total_bots = len(active_bots.get("data", {})) if isinstance(active_bots, dict) else 0
+        result = await bot_management_tools.get_active_bots_status(client)
 
         summary = (
             f"Active Bots Status Summary:\n"
-            f"Total Active Bots: {total_bots}\n\n"
-            f"{bots_table}"
+            f"Total Active Bots: {result['total_bots']}\n\n"
+            f"{result['bots_table']}"
         )
 
         return summary
@@ -1559,51 +915,24 @@ async def get_bot_logs(
     """
     try:
         client = await hummingbot_client.get_client()
-        active_bots = await client.bot_orchestration.get_active_bots_status()
+        result = await bot_management_tools.get_bot_logs(
+            client=client,
+            bot_name=bot_name,
+            log_type=log_type,
+            limit=limit,
+            search_term=search_term,
+        )
 
-        if not isinstance(active_bots, dict) or "data" not in active_bots:
-            return "No active bots data found"
-
-        if bot_name not in active_bots["data"]:
-            available_bots = list(active_bots["data"].keys())
-            return f"Bot '{bot_name}' not found. Available bots: {available_bots}"
-
-        bot_data = active_bots["data"][bot_name]
-
-        # Validate limit
-        limit = min(max(1, limit), 1000)
-
-        logs = []
-
-        # Collect error logs if requested
-        if log_type in ["error", "all"] and "error_logs" in bot_data:
-            error_logs = bot_data["error_logs"]
-            for log_entry in error_logs:
-                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
-                    log_entry["log_category"] = "error"
-                    logs.append(log_entry)
-
-        # Collect general logs if requested
-        if log_type in ["general", "all"] and "general_logs" in bot_data:
-            general_logs = bot_data["general_logs"]
-            for log_entry in general_logs:
-                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
-                    log_entry["log_category"] = "general"
-                    logs.append(log_entry)
-
-        # Sort logs by timestamp (most recent first) and apply limit
-        logs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-        logs = logs[:limit]
-
-        # Format logs as table for better readability
-        logs_table = format_bot_logs_as_table(logs)
+        # Check for errors
+        if "error" in result:
+            return result["message"]
 
         summary = (
-            f"Bot Logs for: {bot_name}\n"
-            f"Log Type: {log_type}\n"
-            f"Search Term: {search_term if search_term else 'None'}\n"
-            f"Total Logs Returned: {len(logs)}\n\n"
-            f"{logs_table}"
+            f"Bot Logs for: {result['bot_name']}\n"
+            f"Log Type: {result['log_type']}\n"
+            f"Search Term: {result['search_term'] if result['search_term'] else 'None'}\n"
+            f"Total Logs Returned: {result['total_logs']}\n\n"
+            f"{result['logs_table']}"
         )
 
         return summary
@@ -1638,29 +967,13 @@ async def manage_bot_execution(
     """
     try:
         client = await hummingbot_client.get_client()
-
-        if action == "stop_bot":
-            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
-            return f"Bot execution stopped and archived: {result}"
-
-        elif action == "stop_controllers":
-            if controller_names is None or len(controller_names) == 0:
-                raise ValueError("controller_names is required for stop_controllers action")
-            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
-                     for controller in controller_names]
-            result = await asyncio.gather(*tasks)
-            return f"Controllers stopped: {result}"
-
-        elif action == "start_controllers":
-            if controller_names is None or len(controller_names) == 0:
-                raise ValueError("controller_names is required for start_controllers action")
-            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": False})
-                     for controller in controller_names]
-            result = await asyncio.gather(*tasks)
-            return f"Controllers started: {result}"
-
-        else:
-            raise ValueError(f"Invalid action: {action}")
+        result = await bot_management_tools.manage_bot_execution(
+            client=client,
+            bot_name=bot_name,
+            action=action,
+            controller_names=controller_names,
+        )
+        return result["message"]
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -1971,7 +1284,7 @@ async def manage_gateway_swaps(
         if action == "search" and isinstance(result, dict):
             filters = result.get("filters", {})
             pagination = result.get("pagination", {})
-            swaps = result.get("result", {}).get("swaps", [])
+            swaps = result.get("result", {}).get("data", [])
 
             summary = (
                 f"Gateway Swaps Search Result:\n"
@@ -2166,7 +1479,7 @@ async def manage_gateway_clmm_positions(
         if action == "search_positions" and isinstance(result, dict):
             filters = result.get("filters", {})
             pagination = result.get("pagination", {})
-            positions = result.get("result", {}).get("positions", [])
+            positions = result.get("result", {}).get("data", [])
 
             summary = (
                 f"Gateway CLMM Positions Search Result:\n"
