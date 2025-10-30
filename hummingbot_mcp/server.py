@@ -32,6 +32,141 @@ logger = logging.getLogger("hummingbot-mcp")
 mcp = FastMCP("hummingbot-mcp")
 
 
+# Helper Functions
+
+def format_bot_logs_as_table(logs: list[dict[str, Any]]) -> str:
+    """
+    Format bot logs as a table string for better LLM processing.
+
+    Columns: time | level | category | message
+    """
+    if not logs:
+        return "No logs found."
+
+    from datetime import datetime
+
+    def format_timestamp(ts: float) -> str:
+        """Format unix timestamp to readable time"""
+        try:
+            dt = datetime.fromtimestamp(ts)
+            return dt.strftime("%H:%M:%S")
+        except:
+            return "N/A"
+
+    def truncate_message(msg: str, max_len: int = 80) -> str:
+        """Truncate message if too long"""
+        if len(msg) <= max_len:
+            return msg
+        return msg[:max_len-3] + "..."
+
+    # Header
+    header = "time     | level | category | message"
+    separator = "-" * 120
+
+    # Format each log as a row
+    rows = []
+    for log_entry in logs:
+        time_str = format_timestamp(log_entry.get("timestamp", 0))
+        level = log_entry.get("level_name", "INFO")[:4]  # Truncate to 4 chars (INFO, WARN, ERR)
+        category = log_entry.get("log_category", "gen")[:3]  # gen or err
+        message = truncate_message(log_entry.get("msg", ""))
+
+        row = f"{time_str} | {level:4} | {category:3} | {message}"
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
+def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
+    """
+    Format active bots data as a table string for better LLM processing.
+
+    Columns: bot_name | controller | status | realized_pnl | unrealized_pnl | global_pnl | volume | errors
+    """
+    if not bots_data or "data" not in bots_data or not bots_data["data"]:
+        return "No active bots found."
+
+    def format_number(num: Any) -> str:
+        """Format number to be more compact"""
+        if num is None or num == "N/A":
+            return "N/A"
+        try:
+            num_float = float(num)
+            if abs(num_float) < 0.01 and num_float != 0:
+                return f"{num_float:.4f}"
+            return f"{num_float:.2f}"
+        except (ValueError, TypeError):
+            return str(num)
+
+    def format_pct(pct: Any) -> str:
+        """Format percentage"""
+        if pct is None or pct == "N/A":
+            return "N/A"
+        try:
+            return f"{float(pct) * 100:.2f}%"
+        except (ValueError, TypeError):
+            return str(pct)
+
+    # Header
+    header = "bot_name | controller | status | realized_pnl | unrealized_pnl | global_pnl | volume | errors | recent_logs"
+    separator = "-" * 120
+
+    # Format each bot as rows
+    rows = []
+    for bot_name, bot_data in bots_data["data"].items():
+        if not isinstance(bot_data, dict):
+            continue
+
+        bot_status = bot_data.get("status", "unknown")
+        error_count = len(bot_data.get("error_logs", []))
+        log_count = len(bot_data.get("general_logs", []))
+
+        # Get controller performance data
+        performance = bot_data.get("performance", {})
+
+        if not performance:
+            # Bot with no controllers
+            row = (
+                f"{bot_name[:20]} | "
+                f"N/A | "
+                f"{bot_status} | "
+                f"N/A | N/A | N/A | N/A | "
+                f"{error_count} | "
+                f"{log_count}"
+            )
+            rows.append(row)
+        else:
+            # Bot with controllers
+            for controller_name, controller_data in performance.items():
+                ctrl_status = controller_data.get("status", "unknown")
+                ctrl_perf = controller_data.get("performance", {})
+
+                realized_pnl = format_number(ctrl_perf.get("realized_pnl_quote"))
+                unrealized_pnl = format_number(ctrl_perf.get("unrealized_pnl_quote"))
+                global_pnl = format_number(ctrl_perf.get("global_pnl_quote"))
+                global_pnl_pct = format_pct(ctrl_perf.get("global_pnl_pct"))
+                volume = format_number(ctrl_perf.get("volume_traded"))
+
+                row = (
+                    f"{bot_name[:20]} | "
+                    f"{controller_name[:20]} | "
+                    f"{ctrl_status} | "
+                    f"{realized_pnl} | "
+                    f"{unrealized_pnl} | "
+                    f"{global_pnl} ({global_pnl_pct}) | "
+                    f"{volume} | "
+                    f"{error_count} | "
+                    f"{log_count}"
+                )
+                rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
 # Account Management Tools
 
 
@@ -869,7 +1004,19 @@ async def get_active_bots_status():
                     if "general_logs" in bot_data:
                         bot_data["general_logs"] = bot_data["general_logs"][-5:]
 
-        return f"Active Bots Status: {active_bots}"
+        # Format as table for better readability
+        bots_table = format_active_bots_as_table(active_bots)
+
+        # Count total bots
+        total_bots = len(active_bots.get("data", {})) if isinstance(active_bots, dict) else 0
+
+        summary = (
+            f"Active Bots Status Summary:\n"
+            f"Total Active Bots: {total_bots}\n\n"
+            f"{bots_table}"
+        )
+
+        return summary
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -930,15 +1077,18 @@ async def get_bot_logs(
         logs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         logs = logs[:limit]
 
-        result = {
-            "bot_name": bot_name,
-            "log_type": log_type,
-            "search_term": search_term,
-            "total_logs_returned": len(logs),
-            "logs": logs
-        }
+        # Format logs as table for better readability
+        logs_table = format_bot_logs_as_table(logs)
 
-        return f"Bot Logs Result: {result}"
+        summary = (
+            f"Bot Logs for: {bot_name}\n"
+            f"Log Type: {log_type}\n"
+            f"Search Term: {search_term if search_term else 'None'}\n"
+            f"Total Logs Returned: {len(logs)}\n\n"
+            f"{logs_table}"
+        )
+
+        return summary
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
