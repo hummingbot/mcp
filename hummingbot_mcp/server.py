@@ -1700,6 +1700,31 @@ async def manage_gateway_container(
         from .tools.gateway import manage_gateway_container as manage_gateway_container_impl
 
         result = await manage_gateway_container_impl(request)
+
+        # Format result based on action
+        action = result.get("action", "")
+
+        if action == "get_status":
+            status = result.get("status", {})
+            running = status.get("running", False)
+            return (
+                f"Gateway Container Status:\n\n"
+                f"Status: {'Running ✓' if running else 'Stopped ✗'}\n"
+                f"Container ID: {status.get('container_id', 'N/A')[:12]}...\n"
+                f"Image: {status.get('image', 'N/A')}\n"
+                f"Port: {status.get('port', 'N/A')}\n"
+                f"Created: {status.get('created_at', 'N/A')[:19]}"
+            )
+
+        elif action == "get_logs":
+            logs = result.get("logs", "No logs available")
+            return f"Gateway Container Logs:\n\n{logs}"
+
+        elif action in ["start", "stop", "restart"]:
+            message = result.get("message", "")
+            return f"Gateway Container: {message}"
+
+        # Fallback for other actions
         return f"Gateway Container Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_container failed: {str(e)}", exc_info=True)
@@ -1783,6 +1808,78 @@ async def manage_gateway_config(
         from .tools.gateway import manage_gateway_config as manage_gateway_config_impl
 
         result = await manage_gateway_config_impl(request)
+
+        # Format result based on resource_type and action
+        resource_type = result.get("resource_type", "")
+        action = result.get("action", "")
+
+        if action == "list":
+            if resource_type == "chains":
+                chains = result.get("result", {}).get("chains", [])
+                output = "Available Chains:\n\n"
+                for chain_info in chains:
+                    chain = chain_info.get("chain", "")
+                    networks = chain_info.get("networks", [])
+                    output += f"- {chain}: {', '.join(networks)}\n"
+                return output
+
+            elif resource_type == "networks":
+                networks = result.get("result", {}).get("networks", [])
+                count = result.get("result", {}).get("count", len(networks))
+                output = f"Available Networks ({count} total):\n\n"
+                for network in networks:
+                    output += f"- {network.get('network_id', 'N/A')}\n"
+                return output
+
+            elif resource_type == "connectors":
+                connectors = result.get("result", {}).get("connectors", [])
+                output = f"Available DEX Connectors ({len(connectors)} total):\n\n"
+                for conn in connectors:
+                    if isinstance(conn, dict):
+                        name = conn.get("name", "unknown")
+                        trading_types = ", ".join(conn.get("trading_types", []))
+                        chain = conn.get("chain", "")
+                        output += f"- {name} ({chain}): {trading_types}\n"
+                    else:
+                        output += f"- {conn}\n"
+                return output
+
+            elif resource_type == "tokens":
+                tokens = result.get("result", {}).get("tokens", [])
+                network_id = result.get("result", {}).get("network_id", "")
+                output = f"Tokens on {network_id} ({len(tokens)} total):\n\n"
+                output += "symbol   | address\n"
+                output += "-" * 50 + "\n"
+                for token in tokens[:20]:  # Limit to first 20
+                    symbol = token.get("symbol", "")[:8]
+                    address = token.get("address", "")
+                    if len(address) > 20:
+                        address = f"{address[:8]}...{address[-6:]}"
+                    output += f"{symbol:8} | {address}\n"
+                if len(tokens) > 20:
+                    output += f"... and {len(tokens) - 20} more tokens\n"
+                return output
+
+            elif resource_type == "wallets":
+                wallets = result.get("result", {}).get("wallets", [])
+                output = f"Configured Wallets ({len(wallets)} total):\n\n"
+                for wallet in wallets:
+                    chain = wallet.get("chain", "")
+                    address = wallet.get("address", "")
+                    if len(address) > 20:
+                        address = f"{address[:10]}...{address[-8:]}"
+                    output += f"- {chain}: {address}\n"
+                return output
+
+        elif action in ["add", "delete", "update"]:
+            message = result.get("result", {}).get("message", "")
+            return f"Gateway Config {action.title()}: {message}"
+
+        elif action == "get":
+            # Keep structured for get action as it returns detailed config
+            return f"Gateway Configuration:\n{result.get('result', {})}"
+
+        # Fallback
         return f"Gateway Configuration Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_config failed: {str(e)}", exc_info=True)

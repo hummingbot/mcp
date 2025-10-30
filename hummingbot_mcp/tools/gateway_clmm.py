@@ -27,12 +27,10 @@ def format_pools_as_table(pools: list[dict[str, Any]]) -> str:
         return "No pools found."
 
     def truncate_address(addr: str) -> str:
-        """Truncate address to first 6 and last 4 characters"""
+        """Return full address without truncation"""
         if not addr or addr == "N/A":
             return "N/A"
-        if len(addr) <= 12:
-            return addr
-        return f"{addr[:6]}...{addr[-4:]}"
+        return addr
 
     def format_number(num: Any) -> str:
         """Format number to be more compact"""
@@ -55,7 +53,7 @@ def format_pools_as_table(pools: list[dict[str, Any]]) -> str:
 
     # Header
     header = "address | name | mint_x | mint_y | bin_step | price | liquidity | apr | apy | volume_24h | fees_24h"
-    separator = "-" * 120
+    separator = "-" * 200
 
     # Format each pool as a row
     rows = []
