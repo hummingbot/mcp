@@ -23,6 +23,7 @@ from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools import bot_management as bot_management_tools
 from hummingbot_mcp.tools import controllers as controllers_tools
 from hummingbot_mcp.tools import market_data as market_data_tools
+from hummingbot_mcp.tools import portfolio as portfolio_tools
 from hummingbot_mcp.tools import trading as trading_tools
 from hummingbot_mcp.tools.account import SetupConnectorRequest
 from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
@@ -302,69 +303,63 @@ async def configure_api_servers(
 
 
 @mcp.tool()
-async def get_portfolio_balances(
-        account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
+async def get_portfolio_overview(
+        account_names: list[str] | None = None,
+        connector_names: list[str] | None = None,
+        include_balances: bool = True,
+        include_perp_positions: bool = True,
+        include_lp_positions: bool = True,
+        as_distribution: bool = False,
 ) -> str:
-    """Get portfolio balances and holdings across all connected exchanges.
+    """Get a unified portfolio overview with balances, perpetual positions, and LP positions.
 
-    Returns detailed token balances, values, and available units for each account. Use this to check your portfolio,
-    see what tokens you hold, and their current values. If passing accounts and connectors it will only return the
-    filtered accounts and connectors, leave it empty to return all accounts and connectors.
-    You can also get the portfolio distribution by setting `as_distribution` to True, which will return the distribution
-    of tokens and their values across accounts and connectors and the percentage of each token in the portfolio.
+    This tool provides a comprehensive view of your entire portfolio by fetching data from multiple sources
+    in parallel. By default, it returns all three types of data, but you can filter to only include
+    specific sections.
+
+    Data Sources (fetched in parallel using asyncio.gather):
+    1. Token Balances - Holdings across all connected CEX/DEX exchanges
+    2. Perpetual Positions - Open perpetual futures positions from CEX
+    3. LP Positions (CLMM) - Concentrated liquidity positions from blockchain DEXs
+       NOTE: LP position data may be stale. Use manage_gateway_clmm_positions with pool addresses for real-time data.
 
     Args:
         account_names: List of account names to filter by (optional). If empty, returns all accounts.
         connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
-        as_distribution: If True, returns the portfolio distribution as a percentage of each token in the portfolio and
-        their values across accounts and connectors. Defaults to False.
+        include_balances: Include token balances in the overview (default: True)
+        include_perp_positions: Include perpetual positions in the overview (default: True)
+        include_lp_positions: Include LP (CLMM) positions in the overview (default: True)
+        as_distribution: Show token balances as distribution percentages (default: False)
     """
     try:
-        # Get account credentials to know which exchanges are connected
         client = await hummingbot_client.get_client()
+
+        # Handle distribution mode separately
         if as_distribution:
-            # Get portfolio distribution
-            result = await client.portfolio.get_distribution(account_names=account_names,
-                                                             connector_names=connector_names)
-            # For distribution, we can keep it simple for now
-            return f"Portfolio Distribution: {result}"
+            result = await client.portfolio.get_distribution(
+                account_names=account_names,
+                connector_names=connector_names
+            )
+            return f"Portfolio Distribution:\n{result}"
 
-        # Get portfolio state
-        result = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
-
-        # Debug: Check the actual structure
-        if not result or not isinstance(result, dict):
-            return f"Error: Unexpected portfolio response format. Type: {type(result)}"
-
-        # Format portfolio as table for better readability
-        portfolio_table = format_portfolio_as_table(result)
-
-        # Calculate total value from nested structure: account -> connector -> balances
-        total_value = 0.0
-        for account_name, connectors in result.items():
-            if not isinstance(connectors, dict):
-                continue
-            for connector_name, balances in connectors.items():
-                if not isinstance(balances, list):
-                    continue
-                for balance in balances:
-                    value = balance.get("value", 0)
-                    if value:
-                        total_value += float(value)
-
-        summary = (
-            f"Portfolio Balances:\n"
-            f"Total Value (USD): ${total_value:.2f}\n\n"
-            f"{portfolio_table}"
+        # Normal portfolio overview
+        result = await portfolio_tools.get_portfolio_overview(
+            client=client,
+            account_names=account_names,
+            connector_names=connector_names,
+            include_balances=include_balances,
+            include_perp_positions=include_perp_positions,
+            include_lp_positions=include_lp_positions,
         )
 
-        return summary
+        return result["formatted_output"]
+
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
     except Exception as e:
-        logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to get account state: {str(e)}")
+        logger.error(f"get_portfolio_overview failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get portfolio overview: {str(e)}")
 
 
 # Trading Tools
@@ -515,41 +510,6 @@ async def get_orders(
     except Exception as e:
         logger.error(f"manage_orders failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage orders: {str(e)}")
-
-
-@mcp.tool()
-async def get_positions(
-        account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
-) -> str:
-    """Get the positions managed by the connected accounts.
-
-    Args:
-        account_names: List of account names to filter by (optional). If empty, returns all accounts.
-        connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
-        limit: Number of positions to return defaults to 100, maximum is 1000.
-    """
-    try:
-        client = await hummingbot_client.get_client()
-        result = await trading_tools.get_positions(
-            client=client,
-            account_names=account_names,
-            connector_names=connector_names,
-            limit=limit,
-        )
-
-        summary = (
-            f"Positions Result:\n"
-            f"Total Positions: {result['total_positions']}\n\n"
-            f"{result['positions_table']}"
-        )
-
-        return summary
-    except HBConnectionError as e:
-        # Re-raise connection errors with the helpful message from hummingbot_client
-        raise ToolError(str(e))
-    except Exception as e:
-        logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage positions: {str(e)}")
 
 
 # Market Data Tools
@@ -1313,6 +1273,7 @@ async def explore_gateway_clmm_pools(
         sort_key: str | None = "volume",
         order_by: str | None = "desc",
         include_unknown: bool = True,
+        detailed: bool = False,
 ) -> str:
     """Explore Gateway CLMM pools: list pools and get pool information.
 
@@ -1333,6 +1294,7 @@ async def explore_gateway_clmm_pools(
         sort_key: Sort by field (volume, tvl, feetvlratio, etc.)
         order_by: Sort order ('asc' or 'desc')
         include_unknown: Include pools with unverified tokens (default: True)
+        detailed: Return detailed table with more columns including mint addresses, fee percentages, and time-series metrics (default: False)
     """
     try:
         # Create and validate request using Pydantic model
@@ -1347,13 +1309,14 @@ async def explore_gateway_clmm_pools(
             sort_key=sort_key,
             order_by=order_by,
             include_unknown=include_unknown,
+            detailed=detailed,
         )
 
         from .tools.gateway_clmm import explore_gateway_clmm_pools as explore_gateway_clmm_pools_impl
 
         result = await explore_gateway_clmm_pools_impl(request)
 
-        # Return formatted table for list_pools to reduce response size
+        # Return formatted table for list_pools (non-detailed mode)
         if action == "list_pools" and "pools_table" in result:
             summary = (
                 f"Gateway CLMM Pool Exploration Result:\n"
@@ -1365,6 +1328,7 @@ async def explore_gateway_clmm_pools(
             )
             return summary
 
+        # Return full dict for detailed mode or get_pool_info
         return f"Gateway CLMM Pool Exploration Result: {result}"
     except Exception as e:
         logger.error(f"explore_gateway_clmm_pools failed: {str(e)}", exc_info=True)
@@ -1492,6 +1456,9 @@ async def manage_gateway_clmm_positions(
 
         return f"Gateway CLMM Position Management Result: {result}"
     except Exception as e:
+        if isinstance(e, ToolError):
+            # Re-raise ToolErrors as-is (they already have good error messages)
+            raise
         logger.error(f"manage_gateway_clmm_positions failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage gateway CLMM positions: {str(e)}")
 
