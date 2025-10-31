@@ -1337,7 +1337,7 @@ async def explore_gateway_clmm_pools(
 
 @mcp.tool()
 async def manage_gateway_clmm_positions(
-        action: Literal["open_position", "close_position", "collect_fees", "get_positions", "search_positions"],
+        action: Literal["open_position", "close_position", "collect_fees", "get_positions"],
         connector: str | None = None,
         network: str | None = None,
         wallet_address: str | None = None,
@@ -1349,17 +1349,8 @@ async def manage_gateway_clmm_positions(
         quote_token_amount: str | None = None,
         slippage_pct: str | None = "1.0",
         extra_params: dict[str, Any] | None = None,
-        search_network: str | None = None,
-        search_connector: str | None = None,
-        search_wallet_address: str | None = None,
-        trading_pair: str | None = None,
-        status: Literal["OPEN", "CLOSED"] | None = None,
-        position_addresses: list[str] | None = None,
-        limit: int = 50,
-        offset: int = 0,
-        refresh: bool = False,
 ) -> str:
-    """Manage Gateway CLMM positions: open, close, collect fees, and search positions.
+    """Manage Gateway CLMM positions: open, close, collect fees, and get positions.
 
     Supports CLMM DEX connectors (Meteora, Raydium, Uniswap V3) for concentrated liquidity positions.
 
@@ -1367,8 +1358,7 @@ async def manage_gateway_clmm_positions(
     - open_position: Create a new CLMM position with initial liquidity
     - close_position: Close a position completely (removes all liquidity)
     - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions owned by a wallet for a specific pool
-    - search_positions: Search positions with various filters
+    - get_positions: Get all positions owned by a wallet for a specific pool (fetches real-time data from blockchain)
 
     Open Position Parameters (required for open_position):
         connector: CLMM connector name (e.g., 'meteora', 'raydium')
@@ -1393,23 +1383,8 @@ async def manage_gateway_clmm_positions(
         network: Network ID in 'chain-network' format
         pool_address: Pool contract address
         wallet_address: Wallet address (optional)
-
-    Search Parameters (optional for search_positions):
-        search_network: Filter by network
-        search_connector: Filter by connector
-        search_wallet_address: Filter by wallet address
-        trading_pair: Filter by trading pair (e.g., 'SOL-USDC')
-        status: Filter by status (OPEN, CLOSED)
-        position_addresses: Filter by specific position addresses
-        limit: Max results (default: 50, max: 1000)
-        offset: Pagination offset (default: 0)
-        refresh: Refresh position data from Gateway before returning (default: True for get_positions/search_positions)
     """
     try:
-        # Auto-enable refresh for get_positions and search_positions to ensure fresh data
-        if action in ["get_positions", "search_positions"] and not refresh:
-            refresh = True
-
         # Create and validate request using Pydantic model
         request = GatewayCLMMPositionRequest(
             action=action,
@@ -1424,35 +1399,11 @@ async def manage_gateway_clmm_positions(
             quote_token_amount=quote_token_amount,
             slippage_pct=slippage_pct,
             extra_params=extra_params,
-            search_network=search_network,
-            search_connector=search_connector,
-            search_wallet_address=search_wallet_address,
-            trading_pair=trading_pair,
-            status=status,
-            position_addresses=position_addresses,
-            limit=limit,
-            offset=offset,
-            refresh=refresh,
         )
 
         from .tools.gateway_clmm import manage_gateway_clmm_positions as manage_gateway_clmm_positions_impl
 
         result = await manage_gateway_clmm_positions_impl(request)
-
-        # Format search_positions results with pagination info
-        if action == "search_positions" and isinstance(result, dict):
-            filters = result.get("filters", {})
-            pagination = result.get("pagination", {})
-            positions = result.get("result", {}).get("data", [])
-
-            summary = (
-                f"Gateway CLMM Positions Search Result:\n"
-                f"Total Positions Found: {len(positions)}\n"
-                f"Limit: {pagination.get('limit', 'N/A')}, Offset: {pagination.get('offset', 'N/A')}\n"
-                f"Filters: {filters if filters else 'None'}\n\n"
-                f"Positions: {positions}"
-            )
-            return summary
 
         return f"Gateway CLMM Position Management Result: {result}"
     except Exception as e:

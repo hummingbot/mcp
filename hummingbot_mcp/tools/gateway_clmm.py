@@ -214,18 +214,16 @@ class GatewayCLMMPositionRequest(BaseModel):
     - open_position: Create a new CLMM position with initial liquidity
     - close_position: Close a position completely (removes all liquidity)
     - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions owned by a wallet for a specific pool
-    - search_positions: Search positions with various filters
+    - get_positions: Get all positions owned by a wallet for a specific pool (fetches real-time data from blockchain)
 
     Progressive Flow:
-    1. action="search_positions" → Browse existing positions
-    2. action="get_positions" + pool_address → Get positions for a specific pool
-    3. action="open_position" + parameters → Create new position
-    4. action="collect_fees" + position_address → Collect fees
-    5. action="close_position" + position_address → Close position
+    1. action="get_positions" + pool_address → Get positions for a specific pool (with real-time fees)
+    2. action="open_position" + parameters → Create new position
+    3. action="collect_fees" + position_address → Collect fees
+    4. action="close_position" + position_address → Close position
     """
 
-    action: Literal["open_position", "close_position", "collect_fees", "get_positions", "search_positions"] = Field(
+    action: Literal["open_position", "close_position", "collect_fees", "get_positions"] = Field(
         description="Action to perform on CLMM positions"
     )
 
@@ -287,55 +285,6 @@ class GatewayCLMMPositionRequest(BaseModel):
     extra_params: dict[str, Any] | None = Field(
         default=None,
         description="Additional connector-specific parameters (e.g., {'strategyType': 0} for Meteora)"
-    )
-
-    # Search parameters (for search_positions)
-    search_network: str | None = Field(
-        default=None,
-        description="Filter by network for search_positions"
-    )
-
-    search_connector: str | None = Field(
-        default=None,
-        description="Filter by connector for search_positions"
-    )
-
-    search_wallet_address: str | None = Field(
-        default=None,
-        description="Filter by wallet address for search_positions"
-    )
-
-    trading_pair: str | None = Field(
-        default=None,
-        description="Filter by trading pair for search_positions (e.g., 'SOL-USDC')"
-    )
-
-    status: Literal["OPEN", "CLOSED"] | None = Field(
-        default=None,
-        description="Filter by position status for search_positions"
-    )
-
-    position_addresses: list[str] | None = Field(
-        default=None,
-        description="Filter by specific position addresses for search_positions"
-    )
-
-    limit: int = Field(
-        default=50,
-        ge=1,
-        le=1000,
-        description="Maximum number of results for search_positions (default: 50, max: 1000)"
-    )
-
-    offset: int = Field(
-        default=0,
-        ge=0,
-        description="Pagination offset for search_positions (default: 0)"
-    )
-
-    refresh: bool = Field(
-        default=False,
-        description="Refresh position data from Gateway before returning (for search_positions)"
     )
 
 
@@ -432,14 +381,13 @@ async def explore_gateway_clmm_pools(request: GatewayCLMMPoolRequest) -> dict[st
 
 async def manage_gateway_clmm_positions(request: GatewayCLMMPositionRequest) -> dict[str, Any]:
     """
-    Manage Gateway CLMM positions: open, close, collect fees, and search positions.
+    Manage Gateway CLMM positions: open, close, collect fees, and get positions.
 
     Actions:
     - open_position: Create a new CLMM position with initial liquidity
     - close_position: Close a position completely (removes all liquidity)
     - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions owned by a wallet for a specific pool
-    - search_positions: Search positions with various filters
+    - get_positions: Get all positions owned by a wallet for a specific pool (real-time data from blockchain)
     """
     try:
         client = await hummingbot_client.get_client()
@@ -563,44 +511,6 @@ async def manage_gateway_clmm_positions(request: GatewayCLMMPositionRequest) -> 
                 "connector": request.connector,
                 "network": request.network,
                 "pool_address": request.pool_address,
-                "result": result
-            }
-
-        # ============================================
-        # SEARCH POSITIONS - Search positions with filters
-        # ============================================
-        elif request.action == "search_positions":
-            # Build search parameters
-            search_params = {
-                "limit": request.limit,
-                "offset": request.offset,
-                "refresh": request.refresh
-            }
-
-            # Add optional filters
-            if request.search_network:
-                search_params["network"] = request.search_network
-            if request.search_connector:
-                search_params["connector"] = request.search_connector
-            if request.search_wallet_address:
-                search_params["wallet_address"] = request.search_wallet_address
-            if request.trading_pair:
-                search_params["trading_pair"] = request.trading_pair
-            if request.status:
-                search_params["status"] = request.status
-            if request.position_addresses:
-                search_params["position_addresses"] = request.position_addresses
-
-            result = await client.gateway_clmm.search_positions(**search_params)
-
-            return {
-                "action": "search_positions",
-                "filters": {k: v for k, v in search_params.items() if k not in ["limit", "offset", "refresh"]},
-                "pagination": {
-                    "limit": search_params["limit"],
-                    "offset": search_params["offset"]
-                },
-                "refresh": search_params["refresh"],
                 "result": result
             }
 
