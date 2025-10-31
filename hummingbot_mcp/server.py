@@ -320,8 +320,12 @@ async def get_portfolio_overview(
     Data Sources (fetched in parallel using asyncio.gather):
     1. Token Balances - Holdings across all connected CEX/DEX exchanges
     2. Perpetual Positions - Open perpetual futures positions from CEX
-    3. LP Positions (CLMM) - Concentrated liquidity positions from blockchain DEXs
-       NOTE: LP position data may be stale. Use manage_gateway_clmm_positions with pool addresses for real-time data.
+    3. LP Positions (CLMM) - Real-time concentrated liquidity positions from blockchain DEXs
+       - Queries database to find all pools user has interacted with
+       - Calls get_positions() for each pool to fetch real-time blockchain data
+       - Includes real-time fees and token amounts
+
+    NOTE: This only shows ACTIVE/OPEN positions. For historical data, use search_history() instead.
 
     Args:
         account_names: List of account names to filter by (optional). If empty, returns all accounts.
@@ -510,6 +514,81 @@ async def get_orders(
     except Exception as e:
         logger.error(f"manage_orders failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage orders: {str(e)}")
+
+
+@mcp.tool()
+async def search_history(
+        data_type: Literal["orders", "perp_positions", "clmm_positions"],
+        account_names: list[str] | None = None,
+        connector_names: list[str] | None = None,
+        trading_pairs: list[str] | None = None,
+        status: str | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        network: str | None = None,
+        wallet_address: str | None = None,
+        position_addresses: list[str] | None = None,
+) -> str:
+    """Search historical data from the backend database.
+
+    This tool is for historical analysis, reporting, and tax purposes.
+    For real-time current state, use get_portfolio_overview() instead.
+
+    Data Types:
+    - orders: Historical order data (filled, cancelled, failed)
+    - perp_positions: Perpetual positions (both open and closed)
+    - clmm_positions: CLMM LP positions (both open and closed)
+
+    Common Filters (apply to all data types):
+        account_names: Filter by account names (optional)
+        connector_names: Filter by connector names (optional)
+        trading_pairs: Filter by trading pairs (optional)
+        status: Filter by status (optional, e.g., 'OPEN', 'CLOSED', 'FILLED', 'CANCELED')
+        start_time: Start timestamp in seconds (optional)
+        end_time: End timestamp in seconds (optional)
+        limit: Maximum number of results (default: 50, max: 1000)
+        offset: Pagination offset (default: 0)
+
+    CLMM-Specific Filters:
+        network: Network filter for CLMM positions (optional)
+        wallet_address: Wallet address filter for CLMM positions (optional)
+        position_addresses: Specific position addresses for CLMM (optional)
+
+    Examples:
+    - Search filled orders: search_history("orders", status="FILLED", limit=100)
+    - Search closed perp positions: search_history("perp_positions", status="CLOSED")
+    - Search all CLMM positions: search_history("clmm_positions", limit=100)
+    """
+    try:
+        client = await hummingbot_client.get_client()
+
+        from .tools import history as history_tools
+
+        result = await history_tools.search_history(
+            client=client,
+            data_type=data_type,
+            account_names=account_names,
+            connector_names=connector_names,
+            trading_pairs=trading_pairs,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            offset=offset,
+            network=network,
+            wallet_address=wallet_address,
+            position_addresses=position_addresses,
+        )
+
+        return result.get("formatted_output", str(result))
+
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"search_history failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to search history: {str(e)}")
 
 
 # Market Data Tools
