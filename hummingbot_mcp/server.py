@@ -309,12 +309,13 @@ async def get_portfolio_overview(
         include_balances: bool = True,
         include_perp_positions: bool = True,
         include_lp_positions: bool = True,
+        include_active_orders: bool = True,
         as_distribution: bool = False,
 ) -> str:
-    """Get a unified portfolio overview with balances, perpetual positions, and LP positions.
+    """Get a unified portfolio overview with balances, perpetual positions, LP positions, and active orders.
 
     This tool provides a comprehensive view of your entire portfolio by fetching data from multiple sources
-    in parallel. By default, it returns all three types of data, but you can filter to only include
+    in parallel. By default, it returns all four types of data, but you can filter to only include
     specific sections.
 
     Data Sources (fetched in parallel using asyncio.gather):
@@ -324,6 +325,7 @@ async def get_portfolio_overview(
        - Queries database to find all pools user has interacted with
        - Calls get_positions() for each pool to fetch real-time blockchain data
        - Includes real-time fees and token amounts
+    4. Active Orders - Currently open orders across all exchanges
 
     NOTE: This only shows ACTIVE/OPEN positions. For historical data, use search_history() instead.
 
@@ -333,6 +335,7 @@ async def get_portfolio_overview(
         include_balances: Include token balances in the overview (default: True)
         include_perp_positions: Include perpetual positions in the overview (default: True)
         include_lp_positions: Include LP (CLMM) positions in the overview (default: True)
+        include_active_orders: Include active (open) orders in the overview (default: True)
         as_distribution: Show token balances as distribution percentages (default: False)
     """
     try:
@@ -354,6 +357,7 @@ async def get_portfolio_overview(
             include_balances=include_balances,
             include_perp_positions=include_perp_positions,
             include_lp_positions=include_lp_positions,
+            include_active_orders=include_active_orders,
         )
 
         return result["formatted_output"]
@@ -457,63 +461,6 @@ async def set_account_position_mode_and_leverage(
     except Exception as e:
         logger.error(f"set_account_position_mode_and_leverage failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to set position mode and leverage: {str(e)}")
-
-
-@mcp.tool()
-async def get_orders(
-        account_names: list[str] | None = None,
-        connector_names: list[str] | None = None,
-        trading_pairs: list[str] | None = None,
-        status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
-        start_time: int | None = None,
-        end_time: int | None = None,
-        limit: int | None = 500,
-        cursor: str | None = None,
-) -> str:
-    """Get the orders manged by the connected accounts.
-
-    Args:
-        account_names: List of account names to filter by (optional). If empty, returns all accounts.
-        connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
-        trading_pairs: List of trading pairs to filter by (optional). If empty, returns all trading pairs.
-        status: Order status to filter by can be OPEN, PARTIALLY_FILLED, FILLED, CANCELED, FAILED (is optional).
-        start_time: Start time (in seconds) to filter by (optional).
-        end_time: End time (in seconds) to filter by (optional).
-        limit: Number of orders to return defaults to 500, maximum is 1000.
-        cursor: Cursor for pagination (optional, should be used if another request returned a cursor).
-    """
-    try:
-        client = await hummingbot_client.get_client()
-        result = await trading_tools.search_orders(
-            client=client,
-            account_names=account_names,
-            connector_names=connector_names,
-            trading_pairs=trading_pairs,
-            status=status,
-            start_time=start_time,
-            end_time=end_time,
-            limit=limit,
-            cursor=cursor,
-        )
-
-        pagination = result["pagination"]
-        summary = (
-            f"Orders Search Result:\n"
-            f"Total Orders Returned: {result['total_returned']}\n"
-            f"Total Count: {pagination.get('total_count', result['total_returned'])}\n"
-            f"Status Filter: {result['status_filter'] if result['status_filter'] else 'All'}\n"
-            f"Has More: {pagination.get('has_more', False)}\n"
-            f"Next Cursor: {pagination.get('next_cursor') if pagination.get('next_cursor') else 'None'}\n\n"
-            f"{result['orders_table']}"
-        )
-
-        return summary
-    except HBConnectionError as e:
-        # Re-raise connection errors with the helpful message from hummingbot_client
-        raise ToolError(str(e))
-    except Exception as e:
-        logger.error(f"manage_orders failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage orders: {str(e)}")
 
 
 @mcp.tool()
@@ -1059,13 +1006,20 @@ async def manage_gateway_container(
         if action == "get_status":
             status = result.get("status", {})
             running = status.get("running", False)
+            container_id = status.get('container_id')
+            created_at = status.get('created_at')
+
+            # Handle None values properly
+            container_id_display = f"{container_id[:12]}..." if container_id else "None"
+            created_at_display = created_at[:19] if created_at else "None"
+
             return (
                 f"Gateway Container Status:\n\n"
                 f"Status: {'Running ✓' if running else 'Stopped ✗'}\n"
-                f"Container ID: {status.get('container_id', 'N/A')[:12]}...\n"
-                f"Image: {status.get('image', 'N/A')}\n"
-                f"Port: {status.get('port', 'N/A')}\n"
-                f"Created: {status.get('created_at', 'N/A')[:19]}"
+                f"Container ID: {container_id_display}\n"
+                f"Image: {status.get('image') or 'None'}\n"
+                f"Port: {status.get('port') or 'None'}\n"
+                f"Created: {created_at_display}"
             )
 
         elif action == "get_logs":
@@ -1080,7 +1034,10 @@ async def manage_gateway_container(
         return f"Gateway Container Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_container failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage gateway container: {str(e)}")
+        error_msg = f"Failed to manage gateway container: {str(e)}"
+        if action != "get_logs":
+            error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
 
 
 @mcp.tool()
@@ -1235,7 +1192,9 @@ async def manage_gateway_config(
         return f"Gateway Configuration Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_config failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage gateway configuration: {str(e)}")
+        error_msg = f"Failed to manage gateway configuration: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
 
 
 @mcp.tool()
@@ -1337,7 +1296,9 @@ async def manage_gateway_swaps(
         return f"Gateway Swap Result: {result}"
     except Exception as e:
         logger.error(f"manage_gateway_swaps failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage gateway swaps: {str(e)}")
+        error_msg = f"Failed to manage gateway swaps: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
 
 
 @mcp.tool()
@@ -1411,7 +1372,9 @@ async def explore_gateway_clmm_pools(
         return f"Gateway CLMM Pool Exploration Result: {result}"
     except Exception as e:
         logger.error(f"explore_gateway_clmm_pools failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to explore gateway CLMM pools: {str(e)}")
+        error_msg = f"Failed to explore gateway CLMM pools: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
 
 
 @mcp.tool()
@@ -1490,7 +1453,9 @@ async def manage_gateway_clmm_positions(
             # Re-raise ToolErrors as-is (they already have good error messages)
             raise
         logger.error(f"manage_gateway_clmm_positions failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage gateway CLMM positions: {str(e)}")
+        error_msg = f"Failed to manage gateway CLMM positions: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
 
 
 async def main():

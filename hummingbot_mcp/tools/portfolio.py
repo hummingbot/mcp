@@ -25,6 +25,7 @@ async def get_portfolio_overview(
     include_balances: bool = True,
     include_perp_positions: bool = True,
     include_lp_positions: bool = True,
+    include_active_orders: bool = True,
 ) -> dict[str, Any]:
     """
     Get a unified portfolio overview with real-time data for all active positions.
@@ -36,6 +37,7 @@ async def get_portfolio_overview(
        - Queries database to find all pools user has interacted with
        - Calls get_positions() for each pool to fetch real-time blockchain data
        - Includes real-time fees and token amounts
+    4. Active Orders - Currently open orders across all exchanges
 
     NOTE: This only shows ACTIVE/OPEN positions. For historical positions and closed positions,
     use the search_history() tool instead.
@@ -47,6 +49,7 @@ async def get_portfolio_overview(
         include_balances: Include token balances (default: True)
         include_perp_positions: Include perpetual positions (default: True)
         include_lp_positions: Include LP (CLMM) positions with real-time data (default: True)
+        include_active_orders: Include active (open) orders (default: True)
 
     Returns:
         Dictionary containing formatted portfolio data with sections for each type
@@ -145,6 +148,24 @@ async def get_portfolio_overview(
 
             tasks.append(get_lp_positions())
             task_names.append("lp_positions")
+
+        # Task 4: Get active orders
+        if include_active_orders:
+            async def get_active_orders():
+                try:
+                    return await trading_tools.search_orders(
+                        client=client,
+                        account_names=account_names,
+                        connector_names=connector_names,
+                        status="OPEN",  # Only get open orders
+                        limit=1000,  # Get all open orders
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to get active orders: {str(e)}")
+                    return None
+
+            tasks.append(get_active_orders())
+            task_names.append("active_orders")
 
         # Execute all tasks in parallel
         results = await asyncio.gather(*tasks, return_exceptions=False)
@@ -309,6 +330,37 @@ async def get_portfolio_overview(
             })
 
         # ============================================
+        # SECTION 4: Active Orders
+        # ============================================
+        if include_active_orders and data.get("active_orders"):
+            orders_data = data["active_orders"]
+
+            if orders_data and isinstance(orders_data, dict):
+                orders_table = orders_data.get("orders_table", "No active orders found")
+                total_orders = orders_data.get("total_returned", 0)
+
+                sections.append({
+                    "title": "Active Orders",
+                    "content": orders_table,
+                    "total_orders": total_orders,
+                    "emoji": "📋"
+                })
+            else:
+                sections.append({
+                    "title": "Active Orders",
+                    "content": "No active orders found",
+                    "total_orders": 0,
+                    "emoji": "📋"
+                })
+        elif include_active_orders and not data.get("active_orders"):
+            sections.append({
+                "title": "Active Orders",
+                "content": "Failed to fetch active orders",
+                "total_orders": 0,
+                "emoji": "⚠️"
+            })
+
+        # ============================================
         # Build final formatted output
         # ============================================
         output_lines = ["Portfolio Overview", "=" * 80, ""]
@@ -339,6 +391,11 @@ async def get_portfolio_overview(
                 open_count = lp_section.get("open_positions", 0)
                 output_lines.append(f"Active LP Positions: {open_count}")
 
+        if include_active_orders:
+            orders_section = next((s for s in sections if s["title"] == "Active Orders"), None)
+            if orders_section and "total_orders" in orders_section:
+                output_lines.append(f"Active Orders: {orders_section['total_orders']}")
+
         formatted_output = "\n".join(output_lines)
 
         return {
@@ -351,6 +408,7 @@ async def get_portfolio_overview(
                 "include_balances": include_balances,
                 "include_perp_positions": include_perp_positions,
                 "include_lp_positions": include_lp_positions,
+                "include_active_orders": include_active_orders,
             }
         }
 
