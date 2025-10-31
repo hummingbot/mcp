@@ -17,59 +17,113 @@ from hummingbot_mcp.hummingbot_client import hummingbot_client
 logger = logging.getLogger("hummingbot-mcp")
 
 
+def format_number(num: Any, decimals: int = 3) -> str:
+    """Format number with max 3 decimal places"""
+    if num is None or num == "N/A":
+        return "N/A"
+    try:
+        num_float = float(num)
+        if num_float == 0:
+            return "0"
+        if num_float >= 1_000_000:
+            return f"{num_float/1_000_000:.{decimals}f}M"
+        elif num_float >= 1_000:
+            return f"{num_float/1_000:.{decimals}f}K"
+        else:
+            return f"{num_float:.{decimals}f}"
+    except (ValueError, TypeError):
+        return str(num)
+
+
 def format_pools_as_table(pools: list[dict[str, Any]]) -> str:
     """
-    Format pool data as a table string for better LLM processing.
+    Format pool data as a simplified table string.
 
-    Columns: address | name | mint_x | mint_y | bin_step | current_price | liquidity | apr | apy | volume_24h | fees_24h
+    Columns: address | trading_pair | bin_step | current_price | liquidity | base_fee_percentage | apy | volume_24h | fees_24h
     """
     if not pools:
         return "No pools found."
 
-    def truncate_address(addr: str) -> str:
-        """Return full address without truncation"""
-        if not addr or addr == "N/A":
-            return "N/A"
-        return addr
-
-    def format_number(num: Any) -> str:
-        """Format number to be more compact"""
-        if num is None or num == "N/A":
-            return "N/A"
-        try:
-            num_float = float(num)
-            if num_float == 0:
-                return "0"
-            if num_float >= 1_000_000:
-                return f"{num_float/1_000_000:.2f}M"
-            elif num_float >= 1_000:
-                return f"{num_float/1_000:.2f}K"
-            elif num_float >= 1:
-                return f"{num_float:.4f}"
-            else:
-                return f"{num_float:.6f}"
-        except (ValueError, TypeError):
-            return str(num)
-
-    # Header
-    header = "address | name | mint_x | mint_y | bin_step | price | liquidity | apr | apy | volume_24h | fees_24h"
+    # Header - simplified columns
+    header = "address | trading_pair | bin_step | current_price | liquidity | base_fee_percentage | apy | volume_24h | fees_24h"
     separator = "-" * 200
 
     # Format each pool as a row
     rows = []
     for pool in pools:
         row = (
-            f"{truncate_address(pool.get('address', 'N/A'))} | "
-            f"{pool.get('name', 'N/A')[:12]} | "
-            f"{truncate_address(pool.get('mint_x', 'N/A'))} | "
-            f"{truncate_address(pool.get('mint_y', 'N/A'))} | "
+            f"{pool.get('address', 'N/A')} | "
+            f"{pool.get('trading_pair', 'N/A')} | "
             f"{pool.get('bin_step', 'N/A')} | "
             f"{format_number(pool.get('current_price'))} | "
             f"{format_number(pool.get('liquidity'))} | "
-            f"{format_number(pool.get('apr'))} | "
+            f"{format_number(pool.get('base_fee_percentage'))} | "
             f"{format_number(pool.get('apy'))} | "
             f"{format_number(pool.get('volume_24h'))} | "
             f"{format_number(pool.get('fees_24h'))}"
+        )
+        rows.append(row)
+
+    # Combine everything
+    table = f"{header}\n{separator}\n" + "\n".join(rows)
+    return table
+
+
+def format_pools_as_detailed_table(pools: list[dict[str, Any]]) -> str:
+    """
+    Format pool data as a detailed table string with exploded volume and fee_tvl_ratio fields.
+
+    Columns: address | trading_pair | mint_x | mint_y | bin_step | current_price | liquidity |
+             base_fee_percentage | max_fee_percentage | protocol_fee_percentage | apr | apy |
+             volume_hour_1 | volume_hour_12 | volume_hour_24 |
+             fee_tvl_ratio_hour_1 | fee_tvl_ratio_hour_12 | fee_tvl_ratio_hour_24
+    """
+    if not pools:
+        return "No pools found."
+
+    # Header - detailed columns
+    header = (
+        "address | trading_pair | mint_x | mint_y | bin_step | current_price | liquidity | "
+        "base_fee_percentage | max_fee_percentage | protocol_fee_percentage | apr | apy | "
+        "volume_hour_1 | volume_hour_12 | volume_hour_24 | "
+        "fee_tvl_ratio_hour_1 | fee_tvl_ratio_hour_12 | fee_tvl_ratio_hour_24"
+    )
+    separator = "-" * 300
+
+    # Format each pool as a row
+    rows = []
+    for pool in pools:
+        # Extract nested volume fields
+        volume = pool.get('volume', {})
+        volume_hour_1 = volume.get('hour_1', 'N/A')
+        volume_hour_12 = volume.get('hour_12', 'N/A')
+        volume_hour_24 = volume.get('hour_24', 'N/A')
+
+        # Extract nested fee_tvl_ratio fields
+        fee_tvl_ratio = pool.get('fee_tvl_ratio', {})
+        fee_tvl_ratio_hour_1 = fee_tvl_ratio.get('hour_1', 'N/A')
+        fee_tvl_ratio_hour_12 = fee_tvl_ratio.get('hour_12', 'N/A')
+        fee_tvl_ratio_hour_24 = fee_tvl_ratio.get('hour_24', 'N/A')
+
+        row = (
+            f"{pool.get('address', 'N/A')} | "
+            f"{pool.get('trading_pair', 'N/A')} | "
+            f"{pool.get('mint_x', 'N/A')} | "
+            f"{pool.get('mint_y', 'N/A')} | "
+            f"{pool.get('bin_step', 'N/A')} | "
+            f"{format_number(pool.get('current_price'))} | "
+            f"{format_number(pool.get('liquidity'))} | "
+            f"{format_number(pool.get('base_fee_percentage'))} | "
+            f"{format_number(pool.get('max_fee_percentage'))} | "
+            f"{format_number(pool.get('protocol_fee_percentage'))} | "
+            f"{format_number(pool.get('apr'))} | "
+            f"{format_number(pool.get('apy'))} | "
+            f"{format_number(volume_hour_1)} | "
+            f"{format_number(volume_hour_12)} | "
+            f"{format_number(volume_hour_24)} | "
+            f"{format_number(fee_tvl_ratio_hour_1)} | "
+            f"{format_number(fee_tvl_ratio_hour_12)} | "
+            f"{format_number(fee_tvl_ratio_hour_24)}"
         )
         rows.append(row)
 
@@ -143,6 +197,13 @@ class GatewayCLMMPoolRequest(BaseModel):
     include_unknown: bool = Field(
         default=True,
         description="Include pools with unverified tokens (default: True)"
+    )
+
+    detailed: bool = Field(
+        default=False,
+        description="Return full raw pool data without formatting (default: False). "
+                    "When True, returns complete pool information as dict. "
+                    "When False, returns simplified table format."
     )
 
 
@@ -308,9 +369,14 @@ async def explore_gateway_clmm_pools(request: GatewayCLMMPoolRequest) -> dict[st
                 include_unknown=request.include_unknown
             )
 
-            # Format pools as table for better LLM processing
             pools = result.get("pools", [])
-            formatted_table = format_pools_as_table(pools)
+
+            # Format as detailed table if detailed mode is enabled
+            if request.detailed:
+                formatted_table = format_pools_as_detailed_table(pools)
+            else:
+                # Otherwise format as simplified table
+                formatted_table = format_pools_as_table(pools)
 
             return {
                 "action": "list_pools",
