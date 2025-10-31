@@ -545,5 +545,36 @@ async def manage_gateway_clmm_positions(request: GatewayCLMMPositionRequest) -> 
         if isinstance(e, ToolError):
             raise
         else:
-            logger.error(f"Error in manage_gateway_clmm_positions: {str(e)}", exc_info=True)
-            raise ToolError(f"Gateway CLMM position management failed: {str(e)}")
+            error_message = str(e)
+            logger.error(f"Error in manage_gateway_clmm_positions: {error_message}", exc_info=True)
+
+            # Provide more helpful error messages for common Gateway errors
+            if "'NoneType' object has no attribute 'get'" in error_message:
+                raise ToolError(
+                    f"Gateway CLMM operation failed with internal error.\n\n"
+                    f"⚠️  Gateway Error: {error_message}\n\n"
+                    f"This error typically indicates:\n"
+                    f"  1. Insufficient SOL balance for blockchain fees (~0.44 SOL needed for position creation)\n"
+                    f"  2. Transaction simulation failure (wallet lacks funds)\n"
+                    f"  3. Missing or invalid wallet configuration\n"
+                    f"  4. Invalid pool or network parameters\n\n"
+                    f"🔍 To diagnose the issue:\n"
+                    f"  1. Check Gateway logs: manage_gateway_container(action='get_logs', tail=50)\n"
+                    f"  2. Look for 'insufficient lamports' or 'Insufficient funds' messages\n"
+                    f"  3. Verify wallet has enough SOL for transaction costs\n\n"
+                    f"💰 Common fixes:\n"
+                    f"  - Add at least 0.5 SOL to your wallet for position operations\n"
+                    f"  - Verify wallet is properly configured in Gateway\n"
+                    f"  - Check that the pool address and network are correct"
+                )
+
+            # Check for insufficient balance errors
+            if "insufficient" in error_message.lower() or "balance" in error_message.lower():
+                raise ToolError(
+                    f"Gateway CLMM operation failed: Insufficient balance.\n\n"
+                    f"Error: {error_message}\n\n"
+                    f"💰 Your wallet doesn't have enough funds for this operation.\n"
+                    f"   Check Gateway logs for specific balance requirements."
+                )
+
+            raise ToolError(f"Gateway CLMM position management failed: {error_message}")
