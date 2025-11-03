@@ -13,9 +13,22 @@ from mcp.server.fastmcp import FastMCP
 
 from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnectionError, ToolError
+from hummingbot_mcp.formatters import (
+    format_active_bots_as_table,
+    format_bot_logs_as_table,
+    format_portfolio_as_table,
+)
 from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
+from hummingbot_mcp.tools import bot_management as bot_management_tools
+from hummingbot_mcp.tools import controllers as controllers_tools
+from hummingbot_mcp.tools import market_data as market_data_tools
+from hummingbot_mcp.tools import portfolio as portfolio_tools
+from hummingbot_mcp.tools import trading as trading_tools
 from hummingbot_mcp.tools.account import SetupConnectorRequest
+from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
+from hummingbot_mcp.tools.gateway_swap import GatewaySwapRequest
+from hummingbot_mcp.tools.gateway_clmm import GatewayCLMMPoolRequest, GatewayCLMMPositionRequest
 
 # Configure root logger
 logging.basicConfig(
@@ -62,6 +75,76 @@ async def setup_connector(
         from .tools.account import setup_connector as setup_connector_impl
 
         result = await setup_connector_impl(request)
+
+        # Format response based on action type
+        action = result.get("action", "")
+
+        if action == "list_connectors":
+            connectors = result.get("connectors", [])
+            # Format connectors in columns for better readability
+            connector_lines = []
+            for i in range(0, len(connectors), 4):
+                line = "  ".join(f"{c:25}" for c in connectors[i:i+4])
+                connector_lines.append(line)
+
+            return (
+                f"Available Exchange Connectors ({result.get('total_connectors', 0)} total):\n\n"
+                + "\n".join(connector_lines) + "\n\n"
+                f"{result.get('current_accounts', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif action == "show_config_map":
+            fields = result.get("required_fields", [])
+            example_dict = result.get("example", {})
+
+            return (
+                f"Required Credentials for {result.get('connector', '')}:\n\n"
+                f"Fields needed:\n" + "\n".join(f"  - {field}" for field in fields) + "\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif action == "select_account":
+            accounts = result.get("accounts", [])
+            return (
+                f"{result.get('message', '')}\n\n"
+                f"Available Accounts:\n" + "\n".join(f"  - {acc}" for acc in accounts) + "\n\n"
+                f"Default Account: {result.get('default_account', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif action == "requires_confirmation":
+            return (
+                f"⚠️  {result.get('message', '')}\n\n"
+                f"Account: {result.get('account', '')}\n"
+                f"Connector: {result.get('connector', '')}\n"
+                f"Warning: {result.get('warning', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif action == "override_rejected":
+            return (
+                f"❌ {result.get('message', '')}\n\n"
+                f"Account: {result.get('account', '')}\n"
+                f"Connector: {result.get('connector', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}"
+            )
+
+        elif action in ["credentials_added", "credentials_overridden"]:
+            return (
+                f"✅ {result.get('message', '')}\n\n"
+                f"Account: {result.get('account', '')}\n"
+                f"Connector: {result.get('connector', '')}\n"
+                f"Credentials Count: {result.get('credentials_count', 0)}\n"
+                f"Was Existing: {result.get('was_existing', False)}\n\n"
+                f"Next Step: {result.get('next_step', '')}"
+            )
+
+        # Fallback for unknown actions
         return f"Setup Connector Result: {result}"
     except Exception as e:
         logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
@@ -220,39 +303,71 @@ async def configure_api_servers(
 
 
 @mcp.tool()
-async def get_portfolio_balances(
-        account_names: list[str] | None = None, connector_names: list[str] | None = None, as_distribution: bool = False
+async def get_portfolio_overview(
+        account_names: list[str] | None = None,
+        connector_names: list[str] | None = None,
+        include_balances: bool = True,
+        include_perp_positions: bool = True,
+        include_lp_positions: bool = True,
+        include_active_orders: bool = True,
+        as_distribution: bool = False,
 ) -> str:
-    """Get portfolio balances and holdings across all connected exchanges.
+    """Get a unified portfolio overview with balances, perpetual positions, LP positions, and active orders.
 
-    Returns detailed token balances, values, and available units for each account. Use this to check your portfolio,
-    see what tokens you hold, and their current values. If passing accounts and connectors it will only return the
-    filtered accounts and connectors, leave it empty to return all accounts and connectors.
-    You can also get the portfolio distribution by setting `as_distribution` to True, which will return the distribution
-    of tokens and their values across accounts and connectors and the percentage of each token in the portfolio.
+    This tool provides a comprehensive view of your entire portfolio by fetching data from multiple sources
+    in parallel. By default, it returns all four types of data, but you can filter to only include
+    specific sections.
+
+    Data Sources (fetched in parallel using asyncio.gather):
+    1. Token Balances - Holdings across all connected CEX/DEX exchanges
+    2. Perpetual Positions - Open perpetual futures positions from CEX
+    3. LP Positions (CLMM) - Real-time concentrated liquidity positions from blockchain DEXs
+       - Queries database to find all pools user has interacted with
+       - Calls get_positions() for each pool to fetch real-time blockchain data
+       - Includes real-time fees and token amounts
+    4. Active Orders - Currently open orders across all exchanges
+
+    NOTE: This only shows ACTIVE/OPEN positions. For historical data, use search_history() instead.
 
     Args:
         account_names: List of account names to filter by (optional). If empty, returns all accounts.
         connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
-        as_distribution: If True, returns the portfolio distribution as a percentage of each token in the portfolio and
-        their values across accounts and connectors. Defaults to False.
+        include_balances: Include token balances in the overview (default: True)
+        include_perp_positions: Include perpetual positions in the overview (default: True)
+        include_lp_positions: Include LP (CLMM) positions in the overview (default: True)
+        include_active_orders: Include active (open) orders in the overview (default: True)
+        as_distribution: Show token balances as distribution percentages (default: False)
     """
     try:
-        # Get account credentials to know which exchanges are connected
         client = await hummingbot_client.get_client()
+
+        # Handle distribution mode separately
         if as_distribution:
-            # Get portfolio distribution
-            result = await client.portfolio.get_distribution(account_names=account_names,
-                                                             connector_names=connector_names)
-            return f"Portfolio Distribution: {result}"
-        account_info = await client.portfolio.get_state(account_names=account_names, connector_names=connector_names)
-        return f"Account State: {account_info}"
+            result = await client.portfolio.get_distribution(
+                account_names=account_names,
+                connector_names=connector_names
+            )
+            return f"Portfolio Distribution:\n{result}"
+
+        # Normal portfolio overview
+        result = await portfolio_tools.get_portfolio_overview(
+            client=client,
+            account_names=account_names,
+            connector_names=connector_names,
+            include_balances=include_balances,
+            include_perp_positions=include_perp_positions,
+            include_lp_positions=include_lp_positions,
+            include_active_orders=include_active_orders,
+        )
+
+        return result["formatted_output"]
+
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
     except Exception as e:
-        logger.error(f"get_account_state failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to get account state: {str(e)}")
+        logger.error(f"get_portfolio_overview failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get portfolio overview: {str(e)}")
 
 
 # Trading Tools
@@ -269,7 +384,7 @@ async def place_order(
         position_action: str | None = "OPEN",
         account_name: str | None = "master_account",
 ) -> str:
-    """Place a buy or sell order (supports USD values by adding at the start of the amount $).
+    """Place a buy or sell order on a OrderBook Exchange (supports USD values by adding at the start of the amount $).
 
     Args:
         connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
@@ -284,14 +399,8 @@ async def place_order(
     """
     try:
         client = await hummingbot_client.get_client()
-        if "$" in amount and price is None:
-            prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pair)
-            price = prices["prices"][trading_pair]
-            amount = float(amount.replace("$", "")) / price
-        else:
-            amount = float(amount)
-        result = await client.trading.place_order(
-            account_name=account_name,
+        result = await trading_tools.place_order(
+            client=client,
             connector_name=connector_name,
             trading_pair=trading_pair,
             trade_type=trade_type,
@@ -299,8 +408,9 @@ async def place_order(
             order_type=order_type,
             price=price,
             position_action=position_action,
+            account_name=account_name,
         )
-        return f"Order Result: {result}"
+        return f"Order Result: {result['result']}"
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -327,30 +437,24 @@ async def set_account_position_mode_and_leverage(
         position_mode: Position mode ('HEDGE' or 'ONE-WAY')
         leverage: Leverage to set (optional, required for HEDGE mode)
     """
-
     try:
         client = await hummingbot_client.get_client()
-        if position_mode is None and leverage is None:
-            raise ValueError("At least one of position_mode or leverage must be specified")
+        results = await trading_tools.set_position_mode_and_leverage(
+            client=client,
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            position_mode=position_mode,
+            leverage=leverage,
+        )
+
         response = ""
-        if position_mode:
-            position_mode = position_mode.upper()
-            if position_mode not in ["HEDGE", "ONE-WAY"]:
-                raise ValueError("Invalid position mode. Must be 'HEDGE' or 'ONE-WAY'")
-            position_mode_result = await client.trading.set_position_mode(
-                account_name=account_name, connector_name=connector_name, position_mode=position_mode
-            )
-            response += f"Position Mode Set: {position_mode_result}\n"
-        if leverage is not None:
-            if not isinstance(leverage, int) or leverage <= 0:
-                raise ValueError("Leverage must be a positive integer")
-            if trading_pair is None:
-                raise ValueError("Trading_pair must be specified")
-            leverage_result = await client.trading.set_leverage(
-                account_name=account_name, connector_name=connector_name, trading_pair=trading_pair, leverage=leverage
-            )
-            response += f"Leverage Set: {leverage_result}\n"
-        return f"{response.strip()}"
+        if "position_mode" in results:
+            response += f"Position Mode Set: {results['position_mode']}\n"
+        if "leverage" in results:
+            response += f"Leverage Set: {results['leverage']}\n"
+
+        return response.strip()
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -360,32 +464,58 @@ async def set_account_position_mode_and_leverage(
 
 
 @mcp.tool()
-async def get_orders(
+async def search_history(
+        data_type: Literal["orders", "perp_positions", "clmm_positions"],
         account_names: list[str] | None = None,
         connector_names: list[str] | None = None,
         trading_pairs: list[str] | None = None,
-        status: Literal["OPEN", "FILLED", "CANCELED", "FAILED"] | None = None,
+        status: str | None = None,
         start_time: int | None = None,
         end_time: int | None = None,
-        limit: int | None = 500,
-        cursor: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        network: str | None = None,
+        wallet_address: str | None = None,
+        position_addresses: list[str] | None = None,
 ) -> str:
-    """Get the orders manged by the connected accounts.
+    """Search historical data from the backend database.
 
-    Args:
-        account_names: List of account names to filter by (optional). If empty, returns all accounts.
-        connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
-        trading_pairs: List of trading pairs to filter by (optional). If empty, returns all trading pairs.
-        status: Order status to filter by can be OPEN, PARTIALLY_FILLED, FILLED, CANCELED, FAILED (is optional).
-        start_time: Start time (in seconds) to filter by (optional).
-        end_time: End time (in seconds) to filter by (optional).
-        limit: Number of orders to return defaults to 500, maximum is 1000.
-        cursor: Cursor for pagination (optional, should be used if another request returned a cursor).
+    This tool is for historical analysis, reporting, and tax purposes.
+    For real-time current state, use get_portfolio_overview() instead.
+
+    Data Types:
+    - orders: Historical order data (filled, cancelled, failed)
+    - perp_positions: Perpetual positions (both open and closed)
+    - clmm_positions: CLMM LP positions (both open and closed)
+
+    Common Filters (apply to all data types):
+        account_names: Filter by account names (optional)
+        connector_names: Filter by connector names (optional)
+        trading_pairs: Filter by trading pairs (optional)
+        status: Filter by status (optional, e.g., 'OPEN', 'CLOSED', 'FILLED', 'CANCELED')
+        start_time: Start timestamp in seconds (optional)
+        end_time: End timestamp in seconds (optional)
+        limit: Maximum number of results (default: 50, max: 1000)
+        offset: Pagination offset (default: 0)
+
+    CLMM-Specific Filters:
+        network: Network filter for CLMM positions (optional)
+        wallet_address: Wallet address filter for CLMM positions (optional)
+        position_addresses: Specific position addresses for CLMM (optional)
+
+    Examples:
+    - Search filled orders: search_history("orders", status="FILLED", limit=100)
+    - Search closed perp positions: search_history("perp_positions", status="CLOSED")
+    - Search all CLMM positions: search_history("clmm_positions", limit=100)
     """
-
     try:
         client = await hummingbot_client.get_client()
-        result = await client.trading.search_orders(
+
+        from .tools import history as history_tools
+
+        result = await history_tools.search_history(
+            client=client,
+            data_type=data_type,
             account_names=account_names,
             connector_names=connector_names,
             trading_pairs=trading_pairs,
@@ -393,39 +523,19 @@ async def get_orders(
             start_time=start_time,
             end_time=end_time,
             limit=limit,
-            cursor=cursor,
+            offset=offset,
+            network=network,
+            wallet_address=wallet_address,
+            position_addresses=position_addresses,
         )
-        return f"Order Management Result: {result}"
+
+        return result.get("formatted_output", str(result))
+
     except HBConnectionError as e:
-        # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
     except Exception as e:
-        logger.error(f"manage_orders failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage orders: {str(e)}")
-
-
-@mcp.tool()
-async def get_positions(
-        account_names: list[str] | None = None, connector_names: list[str] | None = None, limit: int | None = 100
-) -> str:
-    """Get the positions managed by the connected accounts.
-
-    Args:
-        account_names: List of account names to filter by (optional). If empty, returns all accounts.
-        connector_names: List of connector names to filter by (optional). If empty, returns all connectors.
-        limit: Number of positions to return defaults to 100, maximum is 1000.
-    """
-    try:
-        client = await hummingbot_client.get_client()
-        result = await client.trading.get_positions(account_names=account_names, connector_names=connector_names,
-                                                    limit=limit)
-        return f"Position Management Result: {result}"
-    except HBConnectionError as e:
-        # Re-raise connection errors with the helpful message from hummingbot_client
-        raise ToolError(str(e))
-    except Exception as e:
-        logger.error(f"manage_positions failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to manage positions: {str(e)}")
+        logger.error(f"search_history failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to search history: {str(e)}")
 
 
 # Market Data Tools
@@ -440,8 +550,19 @@ async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
     """
     try:
         client = await hummingbot_client.get_client()
-        prices = await client.market_data.get_prices(connector_name=connector_name, trading_pairs=trading_pairs)
-        return f"Price results: {prices}"
+        result = await market_data_tools.get_prices(
+            client=client,
+            connector_name=connector_name,
+            trading_pairs=trading_pairs,
+        )
+
+        summary = (
+            f"Latest Prices for {result['connector_name']}:\n"
+            f"Timestamp: {result['timestamp']}\n\n"
+            f"{result['prices_table']}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -461,29 +582,22 @@ async def get_candles(connector_name: str, trading_pair: str, interval: str = "1
     """
     try:
         client = await hummingbot_client.get_client()
-        available_candles_connectors = await client.market_data.get_available_candle_connectors()
-        if connector_name not in available_candles_connectors:
-            raise ValueError(
-                f"Connector '{connector_name}' does not support candle data. Available connectors: {available_candles_connectors}"
-            )
-        # Determine max records based on interval "m" is minute, "s" is second, "h" is hour, "d" is day, "w" is week
-        if interval.endswith("m"):
-            max_records = 1440 * days  # 1440 minutes in a day
-        elif interval.endswith("h"):
-            max_records = 24 * days
-        elif interval.endswith("d"):
-            max_records = days
-        elif interval.endswith("w"):
-            max_records = 7 * days
-        else:
-            raise ValueError(
-                f"Unsupported interval format: {interval}. Use '1m', '5m', '15m', '30m', '1h', '4h', '1d', or '1w'.")
-        max_records = int(max_records / int(interval[:-1])) if interval[:-1] else max_records
-
-        candles = await client.market_data.get_candles(
-            connector_name=connector_name, trading_pair=trading_pair, interval=interval, max_records=max_records
+        result = await market_data_tools.get_candles(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            interval=interval,
+            days=days,
         )
-        return f"Candle results: {candles}"
+
+        summary = (
+            f"Candles for {result['trading_pair']} on {result['connector_name']}:\n"
+            f"Interval: {result['interval']}\n"
+            f"Total Candles: {result['total_candles']}\n\n"
+            f"{result['candles_table']}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -502,14 +616,21 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
     """
     try:
         client = await hummingbot_client.get_client()
-        if "_perpetual" not in connector_name:
-            raise ValueError(
-                f"Connector '{connector_name}' is not a perpetual connector. Funding rates are only available for"
-                f"perpetual connectors."
-            )
-        funding_rate = await client.market_data.get_funding_info(connector_name=connector_name,
-                                                                 trading_pair=trading_pair)
-        return f"Funding Rate: {funding_rate}"
+        result = await market_data_tools.get_funding_rate(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+        )
+
+        summary = (
+            f"Funding Rate for {result['trading_pair']} on {result['connector_name']}:\n\n"
+            f"Funding Rate: {result['funding_rate_pct']:.4f}%\n"
+            f"Mark Price: ${result['mark_price']:.2f}\n"
+            f"Index Price: ${result['index_price']:.2f}\n"
+            f"Next Funding Time: {result['next_funding_time']}"
+        )
+
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -539,32 +660,32 @@ async def get_order_book(
     """
     try:
         client = await hummingbot_client.get_client()
-        if query_type == "snapshot":
-            order_book = await client.market_data.get_order_book(connector_name=connector_name,
-                                                                 trading_pair=trading_pair)
-            return f"Order Book Snapshot: {order_book}"
+        result = await market_data_tools.get_order_book(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            query_type=query_type,
+            query_value=query_value,
+            is_buy=is_buy,
+        )
+
+        # Format response based on query type
+        if result["query_type"] == "snapshot":
+            summary = (
+                f"Order Book Snapshot for {result['trading_pair']} on {result['connector_name']}:\n"
+                f"Timestamp: {result['timestamp']}\n"
+                f"Top 10 Levels:\n\n"
+                f"{result['order_book_table']}"
+            )
         else:
-            if query_value is None:
-                raise ValueError(f"query_value must be provided for query_type '{query_type}'")
-            if query_type == "volume_for_price":
-                result = await client.market_data.get_volume_for_price(
-                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
-                )
-            elif query_type == "price_for_volume":
-                result = await client.market_data.get_price_for_volume(
-                    connector_name=connector_name, trading_pair=trading_pair, volume=query_value, is_buy=is_buy
-                )
-            elif query_type == "quote_volume_for_price":
-                result = await client.market_data.get_quote_volume_for_price(
-                    connector_name=connector_name, trading_pair=trading_pair, price=query_value, is_buy=is_buy
-                )
-            elif query_type == "price_for_quote_volume":
-                result = await client.market_data.get_price_for_quote_volume(
-                    connector_name=connector_name, trading_pair=trading_pair, quote_volume=query_value, is_buy=is_buy
-                )
-            else:
-                raise ValueError(f"Unsupported query type: {query_type}")
-            return f"Order Book Query Result: {result}"
+            summary = (
+                f"Order Book Query for {result['trading_pair']} on {result['connector_name']}:\n\n"
+                f"Query Type: {result['query_type']}\n"
+                f"Query Value: {result['query_value']}\n"
+                f"Side: {result['side']}\n"
+                f"Result: {result['result']}"
+            )
+        return summary
     except HBConnectionError as e:
         # Re-raise connection errors with the helpful message from hummingbot_client
         raise ToolError(str(e))
@@ -619,50 +740,14 @@ async def explore_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-        # List all controllers and their configs
-        controllers = await client.controllers.list_controllers()
-        configs = await client.controllers.list_controller_configs()
-        result = ""
-        if action == "list":
-            result = "Available Controllers:\n\n"
-            for c_type, controllers in controllers.items():
-                if controller_type is not None and c_type != controller_type:
-                    continue
-                result += f"Controller Type: {c_type}\n"
-                for controller in controllers:
-                    controller_configs = [c for c in configs if c.get('controller_name') == controller]
-                    result += f"- {controller} ({len(controller_configs)} configs)\n"
-                    if len(controller_configs) > 0:
-                        for config in controller_configs:
-                            result += f"    - {config.get('id', 'unknown')}\n"
-            return result
-        elif action == "describe":
-            config = await client.controllers.get_controller_config(config_name) if config_name else None
-            if config:
-                if controller_name != config.get("controller_name"):
-                    controller_name = config.get("controller_name")
-                    result += f"Controller name not matching, using config's controller name: {controller_name}\n"
-                result += f"Config Details for {config_name}:\n{config}\n\n"
-            if not controller_name:
-                return "Please provide a controller name to describe."
-            # First, determine the controller type
-            controller_type = None
-            for c_type, controllers in controllers.items():
-                if controller_name in controllers:
-                    controller_type = c_type
-                    break
-            if not controller_type:
-                return f"Controller '{controller_name}' not found."
-            # Get controller code and configs
-            controller_code = await client.controllers.get_controller(controller_type, controller_name)
-            controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
-            result = f"Controller Code for {controller_name} ({controller_type}):\n{controller_code}\n\n"
-            template = await client.controllers.get_controller_config_template(controller_type, controller_name)
-            result += f"All configs available for controller:\n {controller_configs}"
-            result += f"\n\nController Config Template:\n{template}\n\n"
-            return result
-        else:
-            return "Invalid action. Use 'list' or 'describe', or omit for overview."
+        result = await controllers_tools.explore_controllers(
+            client=client,
+            action=action,
+            controller_type=controller_type,
+            controller_name=controller_name,
+            config_name=config_name,
+        )
+        return result["formatted_output"]
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -716,89 +801,19 @@ async def modify_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-
-        if target == "controller":
-            if action == "upsert":
-                if not controller_type or not controller_name or not controller_code:
-                    raise ValueError("controller_type, controller_name, and controller_code are required for controller upsert")
-
-                # Check if controller exists
-                controllers = await client.controllers.list_controllers()
-                exists = controller_name in controllers.get(controller_type, [])
-
-                if exists and not confirm_override:
-                    controller_code = await client.controllers.get_controller(controller_type, controller_name)
-                    return (f"Controller '{controller_name}' already exists and this is the current code: {controller_code}. "
-                            f"Set confirm_override=True to update it.")
-
-                result = await client.controllers.create_or_update_controller(
-                    controller_type, controller_name, controller_code
-                )
-                return f"Controller {'updated' if exists else 'created'}: {result}"
-
-            elif action == "delete":
-                if not controller_type or not controller_name:
-                    raise ValueError("controller_type and controller_name are required for controller delete")
-
-                result = await client.controllers.delete_controller(controller_type, controller_name)
-                return f"Controller deleted: {result}"
-
-        elif target == "config":
-            if action == "upsert":
-                if not config_name or not config_data:
-                    raise ValueError("config_name and config_data are required for config upsert")
-
-                # Extract controller_type and controller_name from config_data
-                config_controller_type = config_data.get("controller_type")
-                config_controller_name = config_data.get("controller_name")
-
-                if not config_controller_type or not config_controller_name:
-                    raise ValueError("config_data must include 'controller_type' and 'controller_name'")
-
-                # validate config first
-                await client.controllers.validate_controller_config(config_controller_type, config_controller_name, config_data)
-
-                if bot_name:
-                    if not confirm_override:
-                        current_configs = await client.controllers.get_bot_controller_configs(bot_name)
-                        config = next((c for c in current_configs if c.get("id") == config_name), None)
-                        if config:
-                            return (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
-                                    "Set confirm_override=True to update it.")
-                        else:
-                            update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
-                            return f"Config created in bot '{bot_name}': {update_op}"
-                    else:
-                        # Ensure config_data has the correct id
-                        if "id" not in config_data or config_data["id"] != config_name:
-                            config_data["id"] = config_name
-                        update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
-                        return f"Config updated in bot '{bot_name}': {update_op}"
-                else:
-                    # Ensure config_data has the correct id
-                    if "id" not in config_data or config_data["id"] != config_name:
-                        config_data["id"] = config_name
-
-                    controller_configs = await client.controllers.list_controller_configs()
-                    exists = config_name in controller_configs
-
-                    if exists and not confirm_override:
-                        existing_config = await client.controllers.get_controller_config(config_name)
-                        return (f"Config '{config_name}' already exists with data: {existing_config}."
-                                "Set confirm_override=True to update it.")
-
-                    result = await client.controllers.create_or_update_controller_config(config_name, config_data)
-                    return f"Config {'updated' if exists else 'created'}: {result}"
-
-            elif action == "delete":
-                if not config_name:
-                    raise ValueError("config_name is required for config delete")
-
-                result = await client.controllers.delete_controller_config(config_name)
-                await client.bot_orchestration.deploy_v2_controllers()
-                return f"Config deleted: {result}"
-        else:
-            raise ValueError("Invalid target. Must be 'controller' or 'config'.")
+        result = await controllers_tools.modify_controllers(
+            client=client,
+            action=action,
+            target=target,
+            controller_type=controller_type,
+            controller_name=controller_name,
+            controller_code=controller_code,
+            config_name=config_name,
+            config_data=config_data,
+            bot_name=bot_name,
+            confirm_override=confirm_override,
+        )
+        return result["message"]
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -829,16 +844,16 @@ async def deploy_bot_with_controllers(
     """
     try:
         client = await hummingbot_client.get_client()
-        # Validate controller configs
-        result = await client.bot_orchestration.deploy_v2_controllers(
-            instance_name=bot_name,
+        result = await controllers_tools.deploy_bot(
+            client=client,
+            bot_name=bot_name,
             controllers_config=controllers_config,
-            credentials_profile=account_name,
+            account_name=account_name,
             max_global_drawdown_quote=max_global_drawdown_quote,
             max_controller_drawdown_quote=max_controller_drawdown_quote,
             image=image,
         )
-        return f"Bot Deployment Result: {result}"
+        return result["message"]
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -853,20 +868,15 @@ async def get_active_bots_status():
     """
     try:
         client = await hummingbot_client.get_client()
-        active_bots = await client.bot_orchestration.get_active_bots_status()
+        result = await bot_management_tools.get_active_bots_status(client)
 
-        # Limit logs to last 5 entries for each bot to reduce output size
-        if isinstance(active_bots, dict) and "data" in active_bots:
-            for bot_name, bot_data in active_bots["data"].items():
-                if isinstance(bot_data, dict):
-                    # Keep only the last 5 error logs
-                    if "error_logs" in bot_data:
-                        bot_data["error_logs"] = bot_data["error_logs"][-5:]
-                    # Keep only the last 5 general logs
-                    if "general_logs" in bot_data:
-                        bot_data["general_logs"] = bot_data["general_logs"][-5:]
+        summary = (
+            f"Active Bots Status Summary:\n"
+            f"Total Active Bots: {result['total_bots']}\n\n"
+            f"{result['bots_table']}"
+        )
 
-        return f"Active Bots Status: {active_bots}"
+        return summary
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
         raise ToolError(
@@ -891,51 +901,27 @@ async def get_bot_logs(
     """
     try:
         client = await hummingbot_client.get_client()
-        active_bots = await client.bot_orchestration.get_active_bots_status()
+        result = await bot_management_tools.get_bot_logs(
+            client=client,
+            bot_name=bot_name,
+            log_type=log_type,
+            limit=limit,
+            search_term=search_term,
+        )
 
-        if not isinstance(active_bots, dict) or "data" not in active_bots:
-            return "No active bots data found"
+        # Check for errors
+        if "error" in result:
+            return result["message"]
 
-        if bot_name not in active_bots["data"]:
-            available_bots = list(active_bots["data"].keys())
-            return f"Bot '{bot_name}' not found. Available bots: {available_bots}"
+        summary = (
+            f"Bot Logs for: {result['bot_name']}\n"
+            f"Log Type: {result['log_type']}\n"
+            f"Search Term: {result['search_term'] if result['search_term'] else 'None'}\n"
+            f"Total Logs Returned: {result['total_logs']}\n\n"
+            f"{result['logs_table']}"
+        )
 
-        bot_data = active_bots["data"][bot_name]
-
-        # Validate limit
-        limit = min(max(1, limit), 1000)
-
-        logs = []
-
-        # Collect error logs if requested
-        if log_type in ["error", "all"] and "error_logs" in bot_data:
-            error_logs = bot_data["error_logs"]
-            for log_entry in error_logs:
-                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
-                    log_entry["log_category"] = "error"
-                    logs.append(log_entry)
-
-        # Collect general logs if requested
-        if log_type in ["general", "all"] and "general_logs" in bot_data:
-            general_logs = bot_data["general_logs"]
-            for log_entry in general_logs:
-                if search_term is None or search_term.lower() in log_entry.get("msg", "").lower():
-                    log_entry["log_category"] = "general"
-                    logs.append(log_entry)
-
-        # Sort logs by timestamp (most recent first) and apply limit
-        logs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-        logs = logs[:limit]
-
-        result = {
-            "bot_name": bot_name,
-            "log_type": log_type,
-            "search_term": search_term,
-            "total_logs_returned": len(logs),
-            "logs": logs
-        }
-
-        return f"Bot Logs Result: {result}"
+        return summary
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -967,29 +953,13 @@ async def manage_bot_execution(
     """
     try:
         client = await hummingbot_client.get_client()
-
-        if action == "stop_bot":
-            result = await client.bot_orchestration.stop_and_archive_bot(bot_name)
-            return f"Bot execution stopped and archived: {result}"
-
-        elif action == "stop_controllers":
-            if controller_names is None or len(controller_names) == 0:
-                raise ValueError("controller_names is required for stop_controllers action")
-            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": True})
-                     for controller in controller_names]
-            result = await asyncio.gather(*tasks)
-            return f"Controllers stopped: {result}"
-
-        elif action == "start_controllers":
-            if controller_names is None or len(controller_names) == 0:
-                raise ValueError("controller_names is required for start_controllers action")
-            tasks = [client.controllers.update_bot_controller_config(bot_name, controller, {"manual_kill_switch": False})
-                     for controller in controller_names]
-            result = await asyncio.gather(*tasks)
-            return f"Controllers started: {result}"
-
-        else:
-            raise ValueError(f"Invalid action: {action}")
+        result = await bot_management_tools.manage_bot_execution(
+            client=client,
+            bot_name=bot_name,
+            action=action,
+            controller_names=controller_names,
+        )
+        return result["message"]
 
     except HBConnectionError as e:
         logger.error(f"Failed to connect to Hummingbot API: {e}")
@@ -1000,22 +970,492 @@ async def manage_bot_execution(
         raise ToolError(f"Failed to manage bot execution: {str(e)}")
 
 
-# Backward compatibility alias (deprecated)
 @mcp.tool()
-async def stop_bot_or_controllers(
-        bot_name: str,
-        controller_names: list[str] | None = None,
-):
-    """
-    [DEPRECATED - Use manage_bot_execution instead]
-    Stop and archive a bot forever or stop the execution of controllers in a running bot.
+async def manage_gateway_container(
+        action: Literal["get_status", "start", "stop", "restart", "get_logs"],
+        config: dict[str, Any] | None = None,
+        tail: int | None = 100,
+) -> str:
+    """Manage Gateway container lifecycle operations.
+
+    Supports:
+    - get_status: Check Gateway container status
+    - start: Start Gateway with configuration
+    - stop: Stop Gateway container
+    - restart: Restart Gateway (optionally with new config)
+    - get_logs: Get container logs
 
     Args:
-        bot_name: Name of the bot to stop
-        controller_names: List of controller names to stop (optional, if not provided will stop the bot execution)
+        action: Action to perform on Gateway container
+        config: Gateway configuration (required for 'start', optional for 'restart').
+               Required fields: passphrase (Gateway passphrase), image (Docker image).
+               Optional fields: port (exposed port, default: 15888), environment (env vars)
+        tail: Number of log lines to retrieve (only for 'get_logs' action, default: 100, max: 200)
     """
-    action = "stop_bot" if controller_names is None or len(controller_names) == 0 else "stop_controllers"
-    return await manage_bot_execution(bot_name, action, controller_names)
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayContainerRequest(action=action, config=config, tail=tail)
+
+        from .tools.gateway import manage_gateway_container as manage_gateway_container_impl
+
+        result = await manage_gateway_container_impl(request)
+
+        # Format result based on action
+        action = result.get("action", "")
+
+        if action == "get_status":
+            status = result.get("status", {})
+            running = status.get("running", False)
+            container_id = status.get('container_id')
+            created_at = status.get('created_at')
+
+            # Handle None values properly
+            container_id_display = f"{container_id[:12]}..." if container_id else "None"
+            created_at_display = created_at[:19] if created_at else "None"
+
+            return (
+                f"Gateway Container Status:\n\n"
+                f"Status: {'Running ✓' if running else 'Stopped ✗'}\n"
+                f"Container ID: {container_id_display}\n"
+                f"Image: {status.get('image') or 'None'}\n"
+                f"Port: {status.get('port') or 'None'}\n"
+                f"Created: {created_at_display}"
+            )
+
+        elif action == "get_logs":
+            logs = result.get("logs", "No logs available")
+            return f"Gateway Container Logs:\n\n{logs}"
+
+        elif action in ["start", "stop", "restart"]:
+            message = result.get("message", "")
+            return f"Gateway Container: {message}"
+
+        # Fallback for other actions
+        return f"Gateway Container Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_container failed: {str(e)}", exc_info=True)
+        error_msg = f"Failed to manage gateway container: {str(e)}"
+        if action != "get_logs":
+            error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
+
+
+@mcp.tool()
+async def manage_gateway_config(
+        resource_type: Literal["chains", "networks", "tokens", "connectors", "pools", "wallets"],
+        action: Literal["list", "get", "update", "add", "delete"],
+        network_id: str | None = None,
+        connector_name: str | None = None,
+        config_updates: dict[str, Any] | None = None,
+        token_address: str | None = None,
+        token_symbol: str | None = None,
+        token_decimals: int | None = None,
+        token_name: str | None = None,
+        pool_type: str | None = None,
+        pool_base: str | None = None,
+        pool_quote: str | None = None,
+        pool_address: str | None = None,
+        search: str | None = None,
+        network: str | None = None,
+        chain: str | None = None,
+        private_key: str | None = None,
+        wallet_address: str | None = None,
+) -> str:
+    """Manage Gateway configuration for chains, networks, tokens, connectors, pools, and wallets.
+
+    Resource Types:
+    - chains: Get all blockchain chains
+    - networks: List/get/update network configurations (format: 'chain-network')
+    - tokens: List/add/delete tokens per network
+    - connectors: List/get/update DEX connector configurations
+    - pools: List/add liquidity pools per connector/network
+    - wallets: Add/delete wallets for blockchain chains
+
+    Args:
+        resource_type: Type of resource to manage
+        action: Action to perform on the resource
+        network_id: Network ID in format 'chain-network' (e.g., 'solana-mainnet-beta')
+        connector_name: DEX connector name (e.g., 'meteora', 'raydium')
+        config_updates: Configuration updates as key-value pairs
+        token_address: Token contract address
+        token_symbol: Token symbol (e.g., 'USDC')
+        token_decimals: Token decimals (e.g., 6 for USDC)
+        token_name: Token name (optional)
+        pool_type: Pool type (e.g., 'CLMM', 'AMM')
+        pool_base: Base token symbol for pool
+        pool_quote: Quote token symbol for pool
+        pool_address: Pool contract address
+        search: Search term to filter tokens
+        network: Network name (e.g., 'mainnet-beta') for pool operations
+        chain: Blockchain chain for wallet (e.g., 'solana', 'ethereum')
+        private_key: Private key for wallet (required for 'add' wallet action)
+        wallet_address: Wallet address (required for 'delete' wallet action)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayConfigRequest(
+            resource_type=resource_type,
+            action=action,
+            network_id=network_id,
+            connector_name=connector_name,
+            config_updates=config_updates,
+            token_address=token_address,
+            token_symbol=token_symbol,
+            token_decimals=token_decimals,
+            token_name=token_name,
+            pool_type=pool_type,
+            pool_base=pool_base,
+            pool_quote=pool_quote,
+            pool_address=pool_address,
+            search=search,
+            network=network,
+            chain=chain,
+            private_key=private_key,
+            wallet_address=wallet_address,
+        )
+
+        from .tools.gateway import manage_gateway_config as manage_gateway_config_impl
+
+        result = await manage_gateway_config_impl(request)
+
+        # Format result based on resource_type and action
+        resource_type = result.get("resource_type", "")
+        action = result.get("action", "")
+
+        if action == "list":
+            if resource_type == "chains":
+                chains = result.get("result", {}).get("chains", [])
+                output = "Available Chains:\n\n"
+                for chain_info in chains:
+                    chain = chain_info.get("chain", "")
+                    networks = chain_info.get("networks", [])
+                    output += f"- {chain}: {', '.join(networks)}\n"
+                return output
+
+            elif resource_type == "networks":
+                networks = result.get("result", {}).get("networks", [])
+                count = result.get("result", {}).get("count", len(networks))
+                output = f"Available Networks ({count} total):\n\n"
+                for network in networks:
+                    output += f"- {network.get('network_id', 'N/A')}\n"
+                return output
+
+            elif resource_type == "connectors":
+                connectors = result.get("result", {}).get("connectors", [])
+                output = f"Available DEX Connectors ({len(connectors)} total):\n\n"
+                for conn in connectors:
+                    if isinstance(conn, dict):
+                        name = conn.get("name", "unknown")
+                        trading_types = ", ".join(conn.get("trading_types", []))
+                        chain = conn.get("chain", "")
+                        output += f"- {name} ({chain}): {trading_types}\n"
+                    else:
+                        output += f"- {conn}\n"
+                return output
+
+            elif resource_type == "tokens":
+                tokens = result.get("result", {}).get("tokens", [])
+                network_id = result.get("result", {}).get("network_id", "")
+                output = f"Tokens on {network_id} ({len(tokens)} total):\n\n"
+                output += "symbol   | address\n"
+                output += "-" * 50 + "\n"
+                for token in tokens[:20]:  # Limit to first 20
+                    symbol = token.get("symbol", "")[:8]
+                    address = token.get("address", "")
+                    if len(address) > 20:
+                        address = f"{address[:8]}...{address[-6:]}"
+                    output += f"{symbol:8} | {address}\n"
+                if len(tokens) > 20:
+                    output += f"... and {len(tokens) - 20} more tokens\n"
+                return output
+
+            elif resource_type == "wallets":
+                wallets = result.get("result", {}).get("wallets", [])
+                output = f"Configured Wallets ({len(wallets)} total):\n\n"
+                for wallet in wallets:
+                    chain = wallet.get("chain", "")
+                    address = wallet.get("address", "")
+                    if len(address) > 20:
+                        address = f"{address[:10]}...{address[-8:]}"
+                    output += f"- {chain}: {address}\n"
+                return output
+
+        elif action in ["add", "delete", "update"]:
+            message = result.get("result", {}).get("message", "")
+            return f"Gateway Config {action.title()}: {message}"
+
+        elif action == "get":
+            # Keep structured for get action as it returns detailed config
+            return f"Gateway Configuration:\n{result.get('result', {})}"
+
+        # Fallback
+        return f"Gateway Configuration Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_config failed: {str(e)}", exc_info=True)
+        error_msg = f"Failed to manage gateway configuration: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
+
+
+@mcp.tool()
+async def manage_gateway_swaps(
+        action: Literal["quote", "execute", "search", "get_status"],
+        connector: str | None = None,
+        network: str | None = None,
+        trading_pair: str | None = None,
+        side: Literal["BUY", "SELL"] | None = None,
+        amount: str | None = None,
+        slippage_pct: str | None = "1.0",
+        wallet_address: str | None = None,
+        transaction_hash: str | None = None,
+        search_connector: str | None = None,
+        search_network: str | None = None,
+        search_wallet_address: str | None = None,
+        search_trading_pair: str | None = None,
+        status: Literal["SUBMITTED", "CONFIRMED", "FAILED"] | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int | None = 50,
+        offset: int | None = 0,
+) -> str:
+    """Manage Gateway swap operations: quote, execute, search swaps.
+
+    Supports DEX router swaps via Jupiter (Solana) and 0x (Ethereum).
+
+    Actions:
+    - quote: Get price quote for a swap before executing
+    - execute: Execute a swap transaction on DEX
+    - search: Search swap history with filters
+    - get_status: Get status of a specific swap by transaction hash
+
+    Quote/Execute Parameters (required for quote/execute):
+        connector: DEX router connector (e.g., 'jupiter', '0x')
+        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta', 'ethereum-mainnet')
+        trading_pair: Trading pair in BASE-QUOTE format (e.g., 'SOL-USDC', 'ETH-USDT')
+        side: Trade side - 'BUY' (buy base with quote) or 'SELL' (sell base for quote)
+        amount: Amount to swap (for BUY: base to receive, for SELL: base to sell)
+        slippage_pct: Maximum slippage percentage (default: 1.0)
+        wallet_address: Wallet address for execute (optional, uses default if not provided)
+
+    Get Status Parameters:
+        transaction_hash: Transaction hash to check status
+
+    Search Parameters (all optional):
+        search_connector: Filter by connector
+        search_network: Filter by network
+        search_wallet_address: Filter by wallet address
+        search_trading_pair: Filter by trading pair
+        status: Filter by status (SUBMITTED, CONFIRMED, FAILED)
+        start_time: Start timestamp (unix seconds)
+        end_time: End timestamp (unix seconds)
+        limit: Max results (default: 50, max: 1000)
+        offset: Pagination offset (default: 0)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewaySwapRequest(
+            action=action,
+            connector=connector,
+            network=network,
+            trading_pair=trading_pair,
+            side=side,
+            amount=amount,
+            slippage_pct=slippage_pct,
+            wallet_address=wallet_address,
+            transaction_hash=transaction_hash,
+            search_connector=search_connector,
+            search_network=search_network,
+            search_wallet_address=search_wallet_address,
+            search_trading_pair=search_trading_pair,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            offset=offset,
+        )
+
+        from .tools.gateway_swap import manage_gateway_swaps as manage_gateway_swaps_impl
+
+        result = await manage_gateway_swaps_impl(request)
+
+        # Format search results with pagination info
+        if action == "search" and isinstance(result, dict):
+            filters = result.get("filters", {})
+            pagination = result.get("pagination", {})
+            swaps = result.get("result", {}).get("data", [])
+
+            summary = (
+                f"Gateway Swaps Search Result:\n"
+                f"Total Swaps Found: {len(swaps)}\n"
+                f"Limit: {pagination.get('limit', 'N/A')}, Offset: {pagination.get('offset', 'N/A')}\n"
+                f"Filters: {filters if filters else 'None'}\n\n"
+                f"Swaps: {swaps}"
+            )
+            return summary
+
+        return f"Gateway Swap Result: {result}"
+    except Exception as e:
+        logger.error(f"manage_gateway_swaps failed: {str(e)}", exc_info=True)
+        error_msg = f"Failed to manage gateway swaps: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
+
+
+@mcp.tool()
+async def explore_gateway_clmm_pools(
+        action: Literal["list_pools", "get_pool_info"],
+        connector: str,
+        network: str | None = None,
+        pool_address: str | None = None,
+        page: int = 0,
+        limit: int = 50,
+        search_term: str | None = None,
+        sort_key: str | None = "volume",
+        order_by: str | None = "desc",
+        include_unknown: bool = True,
+        detailed: bool = False,
+) -> str:
+    """Explore Gateway CLMM pools: list pools and get pool information.
+
+    Supports CLMM DEX connectors (Meteora, Raydium, Uniswap V3) for concentrated liquidity pools.
+
+    Actions:
+    - list_pools: Browse available CLMM pools with filtering and sorting
+    - get_pool_info: Get detailed information about a specific pool (requires network and pool_address)
+
+    Args:
+        action: Action to perform ('list_pools' or 'get_pool_info')
+        connector: CLMM connector name (e.g., 'meteora', 'raydium', 'uniswap')
+        network: Network ID in 'chain-network' format (required for get_pool_info, e.g., 'solana-mainnet-beta')
+        pool_address: Pool contract address (required for get_pool_info)
+        page: Page number for list_pools (default: 0)
+        limit: Results per page for list_pools (default: 50, max: 100)
+        search_term: Search term to filter pools by token symbols (e.g., 'SOL', 'USDC')
+        sort_key: Sort by field (volume, tvl, feetvlratio, etc.)
+        order_by: Sort order ('asc' or 'desc')
+        include_unknown: Include pools with unverified tokens (default: True)
+        detailed: Return detailed table with more columns including mint addresses, fee percentages, and time-series metrics (default: False)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayCLMMPoolRequest(
+            action=action,
+            connector=connector,
+            network=network,
+            pool_address=pool_address,
+            page=page,
+            limit=limit,
+            search_term=search_term,
+            sort_key=sort_key,
+            order_by=order_by,
+            include_unknown=include_unknown,
+            detailed=detailed,
+        )
+
+        from .tools.gateway_clmm import explore_gateway_clmm_pools as explore_gateway_clmm_pools_impl
+
+        result = await explore_gateway_clmm_pools_impl(request)
+
+        # Return formatted table for list_pools (non-detailed mode)
+        if action == "list_pools" and "pools_table" in result:
+            summary = (
+                f"Gateway CLMM Pool Exploration Result:\n"
+                f"Connector: {result['connector']}\n"
+                f"Total Pools: {result['pagination']['total']}\n"
+                f"Page: {result['pagination']['page']}, Limit: {result['pagination']['limit']}\n"
+                f"Filters: {result['filters']}\n\n"
+                f"{result['pools_table']}"
+            )
+            return summary
+
+        # Return full dict for detailed mode or get_pool_info
+        return f"Gateway CLMM Pool Exploration Result: {result}"
+    except Exception as e:
+        logger.error(f"explore_gateway_clmm_pools failed: {str(e)}", exc_info=True)
+        error_msg = f"Failed to explore gateway CLMM pools: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
+
+
+@mcp.tool()
+async def manage_gateway_clmm_positions(
+        action: Literal["open_position", "close_position", "collect_fees", "get_positions"],
+        connector: str | None = None,
+        network: str | None = None,
+        wallet_address: str | None = None,
+        pool_address: str | None = None,
+        position_address: str | None = None,
+        lower_price: str | None = None,
+        upper_price: str | None = None,
+        base_token_amount: str | None = None,
+        quote_token_amount: str | None = None,
+        slippage_pct: str | None = "1.0",
+        extra_params: dict[str, Any] | None = None,
+) -> str:
+    """Manage Gateway CLMM positions: open, close, collect fees, and get positions.
+
+    Supports CLMM DEX connectors (Meteora, Raydium, Uniswap V3) for concentrated liquidity positions.
+
+    Actions:
+    - open_position: Create a new CLMM position with initial liquidity
+    - close_position: Close a position completely (removes all liquidity)
+    - collect_fees: Collect accumulated fees from a position
+    - get_positions: Get all positions owned by a wallet for a specific pool (fetches real-time data from blockchain)
+
+    Open Position Parameters (required for open_position):
+        connector: CLMM connector name (e.g., 'meteora', 'raydium')
+        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta')
+        pool_address: Pool contract address
+        lower_price: Lower price bound (e.g., '150')
+        upper_price: Upper price bound (e.g., '250')
+        base_token_amount: Amount of base token to provide (optional)
+        quote_token_amount: Amount of quote token to provide (optional)
+        slippage_pct: Maximum slippage percentage (default: 1.0)
+        wallet_address: Wallet address (optional, uses default if not provided)
+        extra_params: Additional connector-specific parameters (e.g., {"strategyType": 0} for Meteora)
+
+    Close/Collect Parameters (required for close_position and collect_fees):
+        connector: CLMM connector name
+        network: Network ID in 'chain-network' format
+        position_address: Position NFT address
+        wallet_address: Wallet address (optional)
+
+    Get Positions Parameters (required for get_positions):
+        connector: CLMM connector name
+        network: Network ID in 'chain-network' format
+        pool_address: Pool contract address
+        wallet_address: Wallet address (optional)
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = GatewayCLMMPositionRequest(
+            action=action,
+            connector=connector,
+            network=network,
+            wallet_address=wallet_address,
+            pool_address=pool_address,
+            position_address=position_address,
+            lower_price=lower_price,
+            upper_price=upper_price,
+            base_token_amount=base_token_amount,
+            quote_token_amount=quote_token_amount,
+            slippage_pct=slippage_pct,
+            extra_params=extra_params,
+        )
+
+        from .tools.gateway_clmm import manage_gateway_clmm_positions as manage_gateway_clmm_positions_impl
+
+        result = await manage_gateway_clmm_positions_impl(request)
+
+        return f"Gateway CLMM Position Management Result: {result}"
+    except Exception as e:
+        if isinstance(e, ToolError):
+            # Re-raise ToolErrors as-is (they already have good error messages)
+            raise
+        logger.error(f"manage_gateway_clmm_positions failed: {str(e)}", exc_info=True)
+        error_msg = f"Failed to manage gateway CLMM positions: {str(e)}"
+        error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
+        raise ToolError(error_msg)
 
 
 async def main():
