@@ -259,7 +259,7 @@ async def modify_controllers(
                                        "Set confirm_override=True to update it."),
                         }
                     else:
-                        update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
+                        update_op = await client.controllers.update_bot_controller_config(bot_name, config_name, config_data)
                         return {
                             "action": "upsert",
                             "target": "config",
@@ -273,7 +273,7 @@ async def modify_controllers(
                     # Ensure config_data has the correct id
                     if "id" not in config_data or config_data["id"] != config_name:
                         config_data["id"] = config_name
-                    update_op = await client.controllers.update_bot_controller_config(config_name, config_data)
+                    update_op = await client.controllers.update_bot_controller_config(bot_name, config_name, config_data)
                     return {
                         "action": "upsert",
                         "target": "config",
