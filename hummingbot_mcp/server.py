@@ -22,6 +22,7 @@ from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools import bot_management as bot_management_tools
 from hummingbot_mcp.tools import controllers as controllers_tools
+from hummingbot_mcp.tools import executors as executors_tools
 from hummingbot_mcp.tools import market_data as market_data_tools
 from hummingbot_mcp.tools import portfolio as portfolio_tools
 from hummingbot_mcp.tools import trading as trading_tools
@@ -29,6 +30,7 @@ from hummingbot_mcp.tools.account import SetupConnectorRequest
 from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
 from hummingbot_mcp.tools.gateway_swap import GatewaySwapRequest
 from hummingbot_mcp.tools.gateway_clmm import GatewayCLMMPoolRequest, GatewayCLMMPositionRequest
+from hummingbot_mcp.prompts import register_all_prompts
 
 # Configure root logger
 logging.basicConfig(
@@ -40,6 +42,9 @@ logger = logging.getLogger("hummingbot-mcp")
 
 # Initialize FastMCP server
 mcp = FastMCP("hummingbot-mcp")
+
+# Register prompts for guided workflows
+register_all_prompts(mcp)
 
 
 # Account Management Tools
@@ -461,6 +466,313 @@ async def set_account_position_mode_and_leverage(
     except Exception as e:
         logger.error(f"set_account_position_mode_and_leverage failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to set position mode and leverage: {str(e)}")
+
+
+# ========================================
+# Executor Tools - Primary Trading Interface
+# ========================================
+
+
+@mcp.tool()
+async def create_executor(
+        executor_config: dict[str, Any],
+        account_name: str | None = None,
+) -> str:
+    """Create and start a new trading executor.
+
+    Executors are smart trading algorithms that handle order placement, position management,
+    and risk controls automatically. This is the primary way to execute trades with Hummingbot.
+
+    Executor Types:
+    - **position_executor**: Single position with stop loss, take profit, time limit
+    - **grid_executor**: Grid trading with multiple buy/sell levels
+    - **dca_executor**: Dollar-cost averaging with multiple entry points
+    - **twap_executor**: Time-weighted average price execution
+    - **arbitrage_executor**: Cross-exchange price arbitrage
+    - **xemm_executor**: Cross-exchange market making
+
+    Args:
+        executor_config: Configuration dict that MUST include:
+            - type: Executor type (e.g., 'position_executor')
+            - connector_name: Exchange (e.g., 'binance_perpetual')
+            - trading_pair: Pair (e.g., 'BTC-USDT')
+            - Additional type-specific parameters
+        account_name: Account to run on (default: master_account)
+
+    Example - Position with stop loss/take profit:
+        create_executor({
+            "type": "position_executor",
+            "connector_name": "binance_perpetual",
+            "trading_pair": "BTC-USDT",
+            "side": "BUY",
+            "amount": "0.01",
+            "triple_barrier_config": {
+                "stop_loss": "0.02",
+                "take_profit": "0.04",
+                "time_limit": 3600
+            }
+        })
+
+    Use get_executor_types() to see all available types and get_executor_schema() for config details.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.create_executor(
+            client=client,
+            executor_config=executor_config,
+            account_name=account_name
+        )
+        return f"Executor created successfully:\n{executors_tools.format_executor_detail(result)}"
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"create_executor failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to create executor: {str(e)}")
+
+
+@mcp.tool()
+async def list_executors(
+        executor_types: list[str] | None = None,
+        is_active: bool | None = None,
+        trading_pair: str | None = None,
+        connector_name: str | None = None,
+        account_name: str | None = None,
+        side: str | None = None,
+) -> str:
+    """List executors with optional filters.
+
+    Args:
+        executor_types: Filter by types (e.g., ['position_executor', 'grid_executor'])
+        is_active: True for active only, False for stopped only, None for all
+        trading_pair: Filter by trading pair (e.g., 'BTC-USDT')
+        connector_name: Filter by exchange (e.g., 'binance_perpetual')
+        account_name: Filter by account
+        side: Filter by side ('BUY' or 'SELL')
+
+    Returns list of executors with their status, PnL, and key details.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.search_executors(
+            client=client,
+            executor_types=executor_types,
+            is_active=is_active,
+            trading_pair=trading_pair,
+            connector_name=connector_name,
+            account_name=account_name,
+            side=side
+        )
+        executors = result.get('data', result) if isinstance(result, dict) else result
+        if isinstance(executors, list):
+            return executors_tools.format_executors_table(executors)
+        return str(result)
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"list_executors failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to list executors: {str(e)}")
+
+
+@mcp.tool()
+async def get_executor(executor_id: str) -> str:
+    """Get detailed information about a specific executor.
+
+    Args:
+        executor_id: The executor ID to retrieve
+
+    Returns full executor details including configuration, status, and performance.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.get_executor(client=client, executor_id=executor_id)
+        return executors_tools.format_executor_detail(result)
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"get_executor failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get executor: {str(e)}")
+
+
+@mcp.tool()
+async def stop_executor(executor_id: str, keep_position: bool = False) -> str:
+    """Stop a running executor.
+
+    Args:
+        executor_id: The executor ID to stop
+        keep_position: If True, keeps any open position. If False (default), closes positions.
+
+    Returns confirmation of the stop action.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.stop_executor(
+            client=client,
+            executor_id=executor_id,
+            keep_position=keep_position
+        )
+        action = "stopped (position kept)" if keep_position else "stopped and position closed"
+        return f"Executor {executor_id} {action}.\nResult: {result}"
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"stop_executor failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to stop executor: {str(e)}")
+
+
+@mcp.tool()
+async def get_executors_summary() -> str:
+    """Get summary statistics for all executors.
+
+    Returns aggregate information including:
+    - Total active/completed executor counts
+    - Total PnL and volume
+    - Breakdown by executor type and status
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.get_executors_summary(client=client)
+        return executors_tools.format_executors_summary_stats(result)
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"get_executors_summary failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get executors summary: {str(e)}")
+
+
+@mcp.tool()
+async def get_executor_types() -> str:
+    """Get list of available executor types with descriptions.
+
+    Returns information about each supported executor type including:
+    - Type name
+    - Description
+    - Use case
+
+    Use get_executor_schema(executor_type) to see the configuration schema for a specific type.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.get_available_executor_types(client=client)
+
+        # Format the result
+        if isinstance(result, dict) and 'executor_types' in result:
+            types_list = result['executor_types']
+            return executors_tools.format_executor_types(types_list)
+        elif isinstance(result, list):
+            # Simple list of type names
+            lines = ["Available Executor Types:", "=" * 40]
+            for t in result:
+                if isinstance(t, dict):
+                    lines.append(f"- {t.get('type', t)}: {t.get('description', '')}")
+                else:
+                    lines.append(f"- {t}")
+            return "\n".join(lines)
+        return str(result)
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"get_executor_types failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get executor types: {str(e)}")
+
+
+@mcp.tool()
+async def get_executor_schema(executor_type: str) -> str:
+    """Get the configuration schema for a specific executor type.
+
+    Args:
+        executor_type: The executor type (e.g., 'position_executor', 'grid_executor')
+
+    Returns detailed information about each configuration field including:
+    - Field name and type
+    - Whether it's required
+    - Default values
+    - Constraints (min, max, etc.)
+
+    Use this to understand what parameters are needed when creating an executor.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.get_executor_config_schema(
+            client=client,
+            executor_type=executor_type
+        )
+
+        # Format the schema
+        lines = [
+            f"Configuration Schema: {executor_type}",
+            "=" * 60,
+            f"Description: {result.get('description', 'N/A')}",
+            "",
+            "Fields:",
+        ]
+
+        fields = result.get('fields', [])
+        for field in fields:
+            req = "required" if field.get('required') else "optional"
+            default = f" (default: {field.get('default')})" if 'default' in field else ""
+            field_type = field.get('type', 'any')
+            lines.append(f"  - {field.get('name')}: {field_type} [{req}]{default}")
+            if field.get('description'):
+                lines.append(f"      {field.get('description')}")
+            if field.get('enum_values'):
+                lines.append(f"      Options: {field.get('enum_values')}")
+
+        nested = result.get('nested_types', {})
+        if nested:
+            lines.extend(["", "Nested Types:"])
+            for name, info in nested.items():
+                lines.append(f"\n  {name}:")
+                if info.get('type') == 'enum':
+                    lines.append(f"    Values: {info.get('values')}")
+                elif info.get('fields'):
+                    for f in info['fields']:
+                        lines.append(f"    - {f.get('name')}: {f.get('type', 'any')}")
+
+        return "\n".join(lines)
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"get_executor_schema failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get executor schema: {str(e)}")
+
+
+@mcp.tool()
+async def get_positions_held() -> str:
+    """Get summary of all positions currently held by executors.
+
+    Returns information about open positions across all executors including
+    connector, trading pair, side, and amounts.
+    """
+    try:
+        client = await hummingbot_client.get_client()
+        result = await executors_tools.get_positions_summary(client=client)
+
+        if not result or (isinstance(result, dict) and not result.get('positions')):
+            return "No positions currently held by executors."
+
+        lines = ["Positions Held by Executors:", "=" * 60]
+        positions = result.get('positions', result) if isinstance(result, dict) else result
+
+        if isinstance(positions, list):
+            for pos in positions:
+                lines.append(
+                    f"  {pos.get('connector_name')}/{pos.get('trading_pair')}: "
+                    f"{pos.get('side')} {pos.get('amount', 0)}"
+                )
+        else:
+            lines.append(str(positions))
+
+        return "\n".join(lines)
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"get_positions_held failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to get positions held: {str(e)}")
+
+
+# ========================================
+# History Tools
+# ========================================
 
 
 @mcp.tool()

@@ -362,6 +362,46 @@ The MCP server provides tools for:
 - Bot deployment and management
 - Controller configuration
 
+## Available Prompts
+
+The MCP server provides guided workflow prompts that work across all MCP-compatible clients (Claude Code, Claude Desktop, Gemini CLI, Cursor, etc.):
+
+### Setup & Installation
+| Prompt | Description |
+|--------|-------------|
+| `setup` | Complete guide to install and run Hummingbot API from scratch |
+| `check_status` | Verify Hummingbot API services and connectivity |
+
+### Trading Bot Creation
+| Prompt | Description |
+|--------|-------------|
+| `first_bot` | Step-by-step guide to create and deploy your first trading bot |
+| `list_strategies` | Explore and understand all available trading strategies |
+
+### Account & Exchange Setup
+| Prompt | Description |
+|--------|-------------|
+| `add_exchange` | Guide to connect CEX accounts with API keys |
+| `add_wallet` | Guide to connect blockchain wallets for DEX trading |
+
+### Troubleshooting
+| Prompt | Description |
+|--------|-------------|
+| `troubleshoot` | Diagnose and fix common issues |
+| `reset_all` | Complete reset guide for fresh installation |
+| `check_logs` | Analyze logs for debugging |
+
+### Using Prompts
+
+In Claude Code:
+```
+/mcp__hummingbot-mcp__setup
+```
+
+In Claude Desktop: Access via the prompt menu or type the prompt name.
+
+In Gemini CLI: Use the prompt command with the prompt name.
+
 ## Development
 
 To run the server in development mode:
