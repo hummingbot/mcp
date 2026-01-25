@@ -1,24 +1,31 @@
 """
-First Trade / Executor prompts - Guide users through their first trades using executors.
+First Trade / Bot prompts - Guide users through their first trades using bots.
+
+Terminology:
+- "Bot" = Executor (user-friendly term for lightweight trading algorithms)
+- "Controller" = Advanced strategy templates deployed as controller instances
 """
 
 
 def register_first_bot_prompts(mcp):
-    """Register first trade/executor prompts."""
+    """Register first trade/bot prompts."""
 
     @mcp.prompt()
     def first_trade() -> str:
-        """Guide the user through their first trade using executors.
+        """Guide the user through their first trade using bots.
 
         This prompt helps users:
-        1. Start with a simple order using Order Executor
-        2. Learn about Position Executor with Triple Barrier risk management
+        1. Start with a simple order using Order Bot
+        2. Learn about Position Bot with Triple Barrier risk management
         3. Monitor and manage positions
         """
         return """# Your First Trade with Hummingbot
 
-You are helping the user execute their first trade using Hummingbot's executor system.
-Executors are smart trading algorithms that handle order placement and position management automatically.
+You are helping the user execute their first trade using Hummingbot's bot system.
+Bots are smart trading algorithms that handle order placement and position management automatically.
+
+**Terminology Note**: When the user says "bot", they mean an executor. Use the executor tools
+(create_executor, list_executors, etc.) but refer to them as "bots" in conversation.
 
 ## Prerequisites Check
 
@@ -35,9 +42,9 @@ If no exchange is connected, use the `add_exchange` prompt first.
 
 ---
 
-## Part 1: Your First Order (Order Executor)
+## Part 1: Your First Order (Order Bot)
 
-Let's start simple. The **Order Executor** places a single order with retry logic - perfect for your first trade.
+Let's start simple. The **Order Bot** places a single order with retry logic - perfect for your first trade.
 
 ### Step 1: Get Current Price
 
@@ -59,8 +66,10 @@ Use create_executor({
 })
 ```
 
+Tell the user: "Creating an Order Bot to buy 0.001 BTC..."
+
 **Parameters:**
-- `type`: "order_executor" for simple orders
+- `type`: "order_executor" (this creates an Order Bot)
 - `connector_name`: Your exchange (e.g., "binance_perpetual", "hyperliquid_perpetual")
 - `trading_pair`: The pair to trade (e.g., "BTC-USDT")
 - `side`: "BUY" or "SELL"
@@ -73,16 +82,16 @@ Use list_executors(is_active=True)
 Use get_portfolio_overview()
 ```
 
-**Congratulations!** You've placed your first order. The Order Executor handles:
+**Congratulations!** You've created your first Order Bot. It handles:
 - Order submission with retry on failures
 - Status tracking
 - Basic error handling
 
 ---
 
-## Part 2: Advanced Trades with Position Executor
+## Part 2: Advanced Trades with Position Bot
 
-Now let's level up. The **Position Executor** adds professional risk management using the **Triple Barrier Method**.
+Now let's level up. The **Position Bot** adds professional risk management using the **Triple Barrier Method**.
 
 ### What is the Triple Barrier Method?
 
@@ -126,7 +135,7 @@ The position exits when it touches ANY of the three barriers first.
 - **Prevents "Forever Positions"**: Time limit ensures positions don't stay open indefinitely
 - **Backtesting Labels**: The method also provides clear labels (+1, -1, 0) for machine learning
 
-### Step 1: Create a Position with Risk Management
+### Step 1: Create a Position Bot with Risk Management
 
 **Example: Long BTC with 2% stop loss and 4% take profit**
 
@@ -145,6 +154,8 @@ Use create_executor({
 })
 ```
 
+Tell the user: "Creating a Position Bot with 2% stop loss and 4% take profit..."
+
 **Parameters explained:**
 - `side`: "BUY" for long, "SELL" for short
 - `amount`: Position size in base currency
@@ -153,24 +164,28 @@ Use create_executor({
   - `take_profit`: Exit if profit reaches this % (0.04 = 4%)
   - `time_limit`: Auto-close after this many seconds (86400 = 24 hours)
 
-### Step 2: Monitor Your Position
+### Step 2: Monitor Your Position Bot
 
 ```
 Use list_executors(is_active=True)
-Use get_executor(executor_id="<your_executor_id>")
+Use get_executor(executor_id="<bot_id>")
 ```
 
-### Step 3: Managing the Position
+Tell user: "Here are your active bots..." or "Here's the status of your Position Bot..."
+
+### Step 3: Managing the Position Bot
 
 **To close early (market exit):**
 ```
-Use stop_executor(executor_id="<your_executor_id>", keep_position=False)
+Use stop_executor(executor_id="<bot_id>", keep_position=False)
 ```
+Tell user: "Stopping the bot and closing the position..."
 
 **To stop monitoring but keep position:**
 ```
-Use stop_executor(executor_id="<your_executor_id>", keep_position=True)
+Use stop_executor(executor_id="<bot_id>", keep_position=True)
 ```
+Tell user: "Stopping the bot but keeping the position open..."
 
 ---
 
@@ -188,34 +203,38 @@ Use stop_executor(executor_id="<your_executor_id>", keep_position=True)
 
 ## Next Steps
 
-After mastering these:
-1. **Grid Executor**: For range-bound markets
-2. **DCA Executor**: For gradual position building
-3. **TWAP Executor**: For large orders with minimal market impact
+After mastering these bots:
+1. **Grid Bot**: For range-bound markets
+2. **DCA Bot**: For gradual position building
+3. **TWAP Bot**: For large orders with minimal market impact
 
-Use `get_executor_types()` to see all available executors.
+Use `get_executor_types()` to see all available bot types.
 
-Which exchange and trading pair would you like to trade? I'll help you place your first order.
+For advanced strategies with custom logic, explore **Controllers** using `explore_controllers()`.
+
+Which exchange and trading pair would you like to trade? I'll help you create your first bot.
 """
 
     @mcp.prompt()
     def list_strategies() -> str:
-        """List and explain all available executor types."""
-        return """# Available Executor Types
+        """List and explain all available bot types and controllers."""
+        return """# Available Trading Strategies
 
-You are helping the user understand the different executor types available in Hummingbot.
+You are helping the user understand the different bot types and controllers available in Hummingbot.
 
-## Get Available Types
+**Terminology:**
+- **Bots** = Executors (lightweight trading algorithms)
+- **Controllers** = Advanced strategy templates (deployed as controller instances)
 
-First, let's see what executor types are available:
+## Part 1: Bot Types
+
+Bots are simple, focused trading algorithms. Get available types:
 
 ```
 Use get_executor_types()
 ```
 
-## Executor Types Overview
-
-### 1. Order Executor (Simplest)
+### 1. Order Bot (Simplest)
 
 **What it does:** Places a single order with retry logic.
 
@@ -223,11 +242,6 @@ Use get_executor_types()
 - Simple buy/sell orders
 - Getting started with trading
 - When you don't need automatic stop loss/take profit
-
-**Key parameters:**
-- `side`: BUY or SELL
-- `amount`: Order size
-- Optional: `price` for limit orders
 
 **Example:**
 ```json
@@ -244,7 +258,7 @@ Get full schema: `get_executor_schema("order_executor")`
 
 ---
 
-### 2. Position Executor (Most Popular)
+### 2. Position Bot (Most Popular)
 
 **What it does:** Opens a position with automatic risk management using the **Triple Barrier Method** (invented by Marcos López de Prado).
 
@@ -269,11 +283,6 @@ Position exits when ANY barrier is touched:
 - Trades with defined risk management
 - Set-and-forget trading
 
-**Key parameters:**
-- `side`: BUY (long) or SELL (short)
-- `amount`: Position size
-- `triple_barrier_config`: Stop loss, take profit, time limit
-
 **Example:**
 ```json
 {
@@ -294,7 +303,7 @@ Get full schema: `get_executor_schema("position_executor")`
 
 ---
 
-### 3. Grid Executor
+### 3. Grid Bot
 
 **What it does:** Places multiple buy/sell orders at different price levels.
 
@@ -303,16 +312,11 @@ Get full schema: `get_executor_schema("position_executor")`
 - Accumulating or distributing positions
 - Markets without strong trends
 
-**Key parameters:**
-- `start_price`, `end_price`: Price range for the grid
-- `n_levels`: Number of grid levels
-- `total_amount_quote`: Total capital to deploy
-
 Get full schema: `get_executor_schema("grid_executor")`
 
 ---
 
-### 4. DCA Executor
+### 4. DCA Bot
 
 **What it does:** Dollar-cost averages into a position over time or price levels.
 
@@ -321,16 +325,11 @@ Get full schema: `get_executor_schema("grid_executor")`
 - Accumulating long-term positions
 - Averaging into volatile markets
 
-**Key parameters:**
-- `n_levels`: Number of DCA entries
-- `total_amount_quote`: Total to invest
-- Time or price intervals between entries
-
 Get full schema: `get_executor_schema("dca_executor")`
 
 ---
 
-### 5. TWAP Executor
+### 5. TWAP Bot
 
 **What it does:** Executes a large order in smaller chunks over time.
 
@@ -339,63 +338,90 @@ Get full schema: `get_executor_schema("dca_executor")`
 - Minimizing market impact
 - Algorithmic order execution
 
-**Key parameters:**
-- `total_duration`: Time to execute over
-- `n_levels`: Number of sub-orders
-- `total_amount_quote`: Total order size
-
 Get full schema: `get_executor_schema("twap_executor")`
 
 ---
 
-### 6. Arbitrage Executor
+### 6. Arbitrage Bot
 
 **What it does:** Exploits price differences between exchanges.
 
 **Best for:**
 - Risk-free profit from price discrepancies
 - Multi-exchange setups
-- Professional market making
 
 Get full schema: `get_executor_schema("arbitrage_executor")`
 
 ---
 
-### 7. XEMM Executor
+### 7. XEMM Bot
 
 **What it does:** Cross-exchange market making - provide liquidity on one exchange, hedge on another.
 
 **Best for:**
 - Professional market making
-- Multi-exchange arbitrage
-- Advanced trading strategies
+- Multi-exchange strategies
 
 Get full schema: `get_executor_schema("xemm_executor")`
 
 ---
 
-## Choosing the Right Executor
+## Part 2: Controllers (Advanced)
 
-| Goal | Recommended Executor |
-|------|---------------------|
-| Simple order | Order Executor |
-| Trade with stop loss/take profit | Position Executor |
-| Sideways/ranging market | Grid Executor |
-| Build position gradually | DCA Executor |
-| Large order execution | TWAP Executor |
-| Multi-exchange profit | Arbitrage / XEMM |
-
-**For beginners:** Start with Order Executor, then graduate to Position Executor.
-
-## Get Configuration Details
-
-To see all parameters for any executor type:
+Controllers are advanced strategy templates for sophisticated trading. They're deployed as **controller instances**.
 
 ```
-Use get_executor_schema("<executor_type>")
+Use explore_controllers(action="list")
 ```
 
-Which executor type interests you? I can help you understand the configuration and create one.
+### Controller Types
+
+- **directional_trading**: Trade based on technical indicators (Bollinger, MACD, Supertrend)
+- **market_making**: Provide liquidity with configurable spreads (PMM strategies)
+- **generic**: Multi-purpose strategies (grid strike, arbitrage, stat arb)
+
+### When to Use Controllers vs Bots
+
+| Scenario | Use |
+|----------|-----|
+| Simple trade with stop loss | Position Bot |
+| Grid trading | Grid Bot |
+| Custom indicator-based strategy | Controller |
+| Multiple strategies running together | Controller |
+| Need advanced configuration | Controller |
+
+### Exploring Controllers
+
+```
+Use explore_controllers(action="describe", controller_name="pmm_simple")
+```
+
+### Deploying a Controller
+
+```
+Use deploy_bot_with_controllers(
+    bot_name="my_market_maker",
+    controllers_config=["pmm_btc_config"]
+)
+```
+
+---
+
+## Choosing the Right Strategy
+
+| Goal | Recommended |
+|------|-------------|
+| Simple order | Order Bot |
+| Trade with stop loss/take profit | Position Bot |
+| Sideways/ranging market | Grid Bot |
+| Build position gradually | DCA Bot |
+| Large order execution | TWAP Bot |
+| Multi-exchange profit | Arbitrage Bot |
+| Custom strategy logic | Controller |
+
+**For beginners:** Start with Order Bot, then graduate to Position Bot.
+
+Which strategy interests you? I can help you understand the configuration and get started.
 """
 
     @mcp.prompt()
@@ -405,7 +431,9 @@ Which executor type interests you? I can help you understand the configuration a
 
 You are helping the user execute common trades quickly.
 
-## Simple Order (Order Executor)
+**Remember**: When user says "bot", use executor tools but refer to them as "bots".
+
+## Simple Order (Order Bot)
 
 **Market buy:**
 ```
@@ -417,6 +445,7 @@ Use create_executor({
     "amount": "<size>"
 })
 ```
+Say: "Creating an Order Bot to buy <size> <PAIR>..."
 
 **Market sell:**
 ```
@@ -428,10 +457,11 @@ Use create_executor({
     "amount": "<size>"
 })
 ```
+Say: "Creating an Order Bot to sell <size> <PAIR>..."
 
 ---
 
-## Position with Risk Management (Position Executor)
+## Position with Risk Management (Position Bot)
 
 **Long with stop loss/take profit:**
 ```
@@ -448,6 +478,7 @@ Use create_executor({
     }
 })
 ```
+Say: "Creating a Position Bot with 2% stop loss and 4% take profit..."
 
 **Short with stop loss/take profit:**
 ```
@@ -464,6 +495,7 @@ Use create_executor({
     }
 })
 ```
+Say: "Creating a short Position Bot with 2% stop loss and 4% take profit..."
 
 ---
 
@@ -479,10 +511,11 @@ Use create_executor({
    Use get_portfolio_overview()
    ```
 
-3. **See active positions:**
+3. **See active bots:**
    ```
    Use list_executors(is_active=True)
    ```
+   Say: "Here are your active bots..."
 
 ---
 
@@ -508,22 +541,25 @@ Use create_executor({
 
 ---
 
-## Manage Positions
+## Manage Bots
 
-**List active:**
+**List active bots:**
 ```
 Use list_executors(is_active=True)
 ```
+Say: "Here are your active bots..."
 
-**Close position:**
+**Stop a bot and close position:**
 ```
 Use stop_executor(executor_id="<id>", keep_position=False)
 ```
+Say: "Stopping the bot and closing the position..."
 
-**Get summary:**
+**Get bot summary:**
 ```
 Use get_executors_summary()
 ```
+Say: "Here's your bot performance summary..."
 
 What would you like to trade?
 """

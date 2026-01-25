@@ -26,49 +26,51 @@ The MCP server will guide you through the credential setup process.
 
 ---
 
-## Trading with Executors
+## Trading with Bots
 
-Executors are smart trading algorithms that handle order placement, position management, and risk controls. This is the primary way to execute trades.
+Bots are smart trading algorithms that handle order placement, position management, and risk controls. This is the primary way to execute trades.
 
-### Executor Progression
+> **Terminology Note**: In the MCP interface, "bots" refer to executors - lightweight trading algorithms. For advanced multi-strategy deployments, see [Controllers](#controllers-advanced) below.
 
-| Level | Executor | Description |
+### Bot Progression
+
+| Level | Bot Type | Description |
 |-------|----------|-------------|
-| 1. Beginner | `order_executor` | Simple order placement with retry logic |
-| 2. Intermediate | `position_executor` | Positions with automatic stop loss, take profit, time limit |
-| 3. Advanced | `grid_executor`, `dca_executor`, `twap_executor` | Sophisticated multi-order strategies |
-| 4. Pro | `arbitrage_executor`, `xemm_executor` | Multi-exchange strategies |
+| 1. Beginner | Order Bot | Simple order placement with retry logic |
+| 2. Intermediate | Position Bot | Positions with automatic stop loss, take profit, time limit |
+| 3. Advanced | Grid Bot, DCA Bot, TWAP Bot | Sophisticated multi-order strategies |
+| 4. Pro | Arbitrage Bot, XEMM Bot | Multi-exchange strategies |
 
 ---
 
-## Step 1: Your First Order (Order Executor)
+## Step 1: Your First Order (Order Bot)
 
-Start with the simplest executor - place a market order:
+Start with the simplest bot - place a market order:
 
 **Buy BTC:**
 ```
-Create an order executor to buy 0.001 BTC on Binance perpetual
+Create an order bot to buy 0.001 BTC on Binance perpetual
 ```
 
 **Sell ETH:**
 ```
-Create an order executor to sell 0.1 ETH on Hyperliquid
+Create an order bot to sell 0.1 ETH on Hyperliquid
 ```
 
-The Order Executor:
+The Order Bot:
 - Places your order with automatic retry on failures
 - Tracks order status
 - Handles basic error recovery
 
 ---
 
-## Step 2: Trades with Risk Management (Position Executor)
+## Step 2: Trades with Risk Management (Position Bot)
 
-Once comfortable with basic orders, graduate to Position Executor for professional risk management.
+Once comfortable with basic orders, graduate to Position Bot for professional risk management.
 
 ### The Triple Barrier Method
 
-Position Executor uses the **Triple Barrier Method**, invented by **Marcos López de Prado** (documented at https://www.quantresearch.org/Innovations.htm).
+Position Bot uses the **Triple Barrier Method**, invented by **Marcos López de Prado** (documented at https://www.quantresearch.org/Innovations.htm).
 
 ![Triple Barrier Method](docs/triple_barrier_method.webp)
 
@@ -82,11 +84,11 @@ Position Executor uses the **Triple Barrier Method**, invented by **Marcos Lópe
 
 The position automatically closes when ANY barrier is touched first.
 
-### Position Executor Examples
+### Position Bot Examples
 
 **Long with stop loss and take profit:**
 ```
-Create a position executor to buy 0.01 BTC on Binance perpetual with:
+Create a position bot to buy 0.01 BTC on Binance perpetual with:
 - 2% stop loss
 - 4% take profit
 - 24 hour time limit
@@ -94,7 +96,7 @@ Create a position executor to buy 0.01 BTC on Binance perpetual with:
 
 **Short ETH with risk management:**
 ```
-Open a short position on ETH-USDT with 0.1 ETH, 3% stop loss, 6% take profit
+Open a short position bot on ETH-USDT with 0.1 ETH, 3% stop loss, 6% take profit
 ```
 
 ### Why Triple Barrier?
@@ -106,52 +108,52 @@ Open a short position on ETH-USDT with 0.1 ETH, 3% stop loss, 6% take profit
 
 ---
 
-## All Executor Types
+## All Bot Types
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| `order_executor` | Single order with retry logic | Simple buy/sell |
-| `position_executor` | Position with Triple Barrier risk management | Directional trading |
-| `grid_executor` | Multiple orders at price levels | Range-bound markets |
-| `dca_executor` | Dollar-cost averaging entries | Gradual accumulation |
-| `twap_executor` | Time-weighted order execution | Large orders |
-| `arbitrage_executor` | Cross-exchange arbitrage | Price discrepancies |
-| `xemm_executor` | Cross-exchange market making | Liquidity provision |
+| Bot | Description | Use Case |
+|-----|-------------|----------|
+| Order Bot | Single order with retry logic | Simple buy/sell |
+| Position Bot | Position with Triple Barrier risk management | Directional trading |
+| Grid Bot | Multiple orders at price levels | Range-bound markets |
+| DCA Bot | Dollar-cost averaging entries | Gradual accumulation |
+| TWAP Bot | Time-weighted order execution | Large orders |
+| Arbitrage Bot | Cross-exchange arbitrage | Price discrepancies |
+| XEMM Bot | Cross-exchange market making | Liquidity provision |
 
 ---
 
-## Managing Executors
+## Managing Bots
 
-### List Active Executors
-
-```
-Show me all my active executors
-```
+### List Active Bots
 
 ```
-List executors for BTC-USDT
-```
-
-### Get Executor Details
-
-```
-Show me details of executor abc123
-```
-
-### Stop an Executor
-
-```
-Stop executor abc123
+Show me all my active bots
 ```
 
 ```
-Stop executor abc123 but keep the position open
+List bots for BTC-USDT
+```
+
+### Get Bot Details
+
+```
+Show me details of bot abc123
+```
+
+### Stop a Bot
+
+```
+Stop bot abc123
+```
+
+```
+Stop bot abc123 but keep the position open
 ```
 
 ### Get Summary Statistics
 
 ```
-Show me my executor performance summary
+Show me my bot performance summary
 ```
 
 ---
@@ -206,12 +208,12 @@ Show my active orders
 
 ### Best Practices
 
-1. **Start with Order Executor** - Master simple orders first
-2. **Graduate to Position Executor** - Add risk management
+1. **Start with Order Bot** - Master simple orders first
+2. **Graduate to Position Bot** - Add risk management
 3. **Always use stop losses** - Triple Barrier makes this easy
 4. **Start small** - Test with small amounts before scaling
 5. **Check balances** - Ensure sufficient funds before trading
-6. **Monitor executors** - Use `list_executors` to track positions
+6. **Monitor bots** - Use `list bots` to track positions
 
 ---
 
@@ -229,12 +231,57 @@ Set leverage to 5x for BTC-USDT on Binance perpetual
 Set position mode to hedge on Binance perpetual
 ```
 
-### View Executor Schema
+### View Bot Configuration Options
 
 To see all configuration options:
 
 ```
-Show me the configuration options for position_executor
+Show me the configuration options for position bot
+```
+
+---
+
+## Controllers (Advanced)
+
+For more sophisticated trading strategies, Hummingbot provides **Controllers**. Controllers are advanced strategy templates that can be configured and deployed as **controller instances**.
+
+> **Terminology Note**: In the Hummingbot API, what appears as "bots" in the bot management endpoints are actually running controller instances. We call them "controllers" here to distinguish from the simpler executor-based bots above.
+
+### When to Use Controllers
+
+| Use Case | Recommendation |
+|----------|----------------|
+| Simple trades with risk management | Use Bots (Position Bot, Grid Bot, etc.) |
+| Complex multi-indicator strategies | Use Controllers |
+| Custom strategy logic | Use Controllers |
+| Running multiple strategies together | Use Controllers |
+
+### Available Controller Types
+
+```
+Show me available controllers
+```
+
+### Controller Examples
+
+- **PMM (Pure Market Making)**: Provide liquidity with configurable spreads
+- **Directional Trading**: Trade based on technical indicators
+- **Cross-Exchange Market Making**: Arbitrage across exchanges
+
+### Deploying a Controller
+
+```
+Help me deploy a market making controller
+```
+
+### Managing Controller Instances
+
+```
+Show me active controller instances
+```
+
+```
+Stop controller instance xyz
 ```
 
 ---
@@ -264,6 +311,16 @@ Show my balances on Binance
 ```
 Show me the logs for my active bots
 ```
+
+---
+
+## Terminology Reference
+
+| User-Friendly Term | Technical Term | Description |
+|--------------------|----------------|-------------|
+| Bot | Executor | Lightweight trading algorithm (order, position, grid, etc.) |
+| Controller | Controller | Advanced strategy template |
+| Controller Instance | Deployed Bot | Running instance of a controller |
 
 ---
 
