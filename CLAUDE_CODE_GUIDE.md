@@ -243,9 +243,14 @@ Show me the configuration options for position bot
 
 ## Controllers (Advanced)
 
-For more sophisticated trading strategies, Hummingbot provides **Controllers**. Controllers are advanced strategy templates that can be configured and deployed as **controller instances**.
+For more sophisticated trading strategies, Hummingbot provides **Controllers**.
 
-> **Terminology Note**: In the Hummingbot API, what appears as "bots" in the bot management endpoints are actually running controller instances. We call them "controllers" here to distinguish from the simpler executor-based bots above.
+**How Controllers Work:**
+1. **Controller** = Strategy template (the code/logic, e.g., "pmm_simple", "bollinger_v1")
+2. **Controller Configuration** = Parameters for that strategy (trading pair, spreads, amounts)
+3. **Controller Instance** = Running deployment with one or more configurations
+
+> **Terminology Note**: In the Hummingbot API, the "bot" endpoints manage controller instances. We call them "controllers" here to distinguish from the simpler executor-based bots above.
 
 ### When to Use Controllers
 
@@ -316,11 +321,12 @@ Show me the logs for my active bots
 
 ## Terminology Reference
 
-| User-Friendly Term | Technical Term | Description |
-|--------------------|----------------|-------------|
-| Bot | Executor | Lightweight trading algorithm (order, position, grid, etc.) |
-| Controller | Controller | Advanced strategy template |
-| Controller Instance | Deployed Bot | Running instance of a controller |
+| Term | Description |
+|------|-------------|
+| **Bot** | User-friendly name for an Executor - a lightweight trading algorithm (order, position, grid, etc.) |
+| **Controller** | Strategy template - the code and logic for a trading strategy |
+| **Controller Configuration** | Parameters for a controller - the specific settings (trading pair, amounts, spreads, etc.) |
+| **Controller Instance** | A running deployment with one or more controller configurations |
 
 ---
 

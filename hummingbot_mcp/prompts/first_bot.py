@@ -3,7 +3,9 @@ First Trade / Bot prompts - Guide users through their first trades using bots.
 
 Terminology:
 - "Bot" = Executor (user-friendly term for lightweight trading algorithms)
-- "Controller" = Advanced strategy templates deployed as controller instances
+- "Controller" = Strategy template (the code/logic)
+- "Controller Configuration" = Parameters for a controller (trading pair, amounts, etc.)
+- "Controller Instance" = Running deployment with one or more controller configs
 """
 
 
@@ -224,7 +226,9 @@ You are helping the user understand the different bot types and controllers avai
 
 **Terminology:**
 - **Bots** = Executors (lightweight trading algorithms)
-- **Controllers** = Advanced strategy templates (deployed as controller instances)
+- **Controllers** = Strategy templates (the code/logic)
+- **Controller Configurations** = Parameters for a controller
+- **Controller Instances** = Running deployments with one or more configs
 
 ## Part 1: Bot Types
 
@@ -368,7 +372,12 @@ Get full schema: `get_executor_schema("xemm_executor")`
 
 ## Part 2: Controllers (Advanced)
 
-Controllers are advanced strategy templates for sophisticated trading. They're deployed as **controller instances**.
+Controllers are advanced strategy templates for sophisticated trading.
+
+**How Controllers Work:**
+1. **Controller** = Strategy template (the code/logic)
+2. **Controller Configuration** = Parameters for that strategy (pair, amounts, spreads)
+3. **Controller Instance** = Running deployment with one or more configs
 
 ```
 Use explore_controllers(action="list")
@@ -393,15 +402,42 @@ Use explore_controllers(action="list")
 ### Exploring Controllers
 
 ```
+# List all controllers
+Use explore_controllers(action="list")
+
+# See controller details and its configurations
 Use explore_controllers(action="describe", controller_name="pmm_simple")
+
+# See a specific configuration
+Use explore_controllers(action="describe", config_name="pmm_btc_config")
 ```
 
-### Deploying a Controller
+### Creating a Controller Configuration
+
+```
+# First explore the controller to see required parameters
+Use explore_controllers(action="describe", controller_name="pmm_simple")
+
+# Then create a configuration
+Use modify_controllers(
+    action="upsert",
+    target="config",
+    config_name="my_pmm_config",
+    config_data={
+        "controller_name": "pmm_simple",
+        "connector_name": "binance_perpetual",
+        "trading_pair": "BTC-USDT",
+        ...
+    }
+)
+```
+
+### Deploying a Controller Instance
 
 ```
 Use deploy_bot_with_controllers(
     bot_name="my_market_maker",
-    controllers_config=["pmm_btc_config"]
+    controllers_config=["my_pmm_config"]  # Can include multiple configs
 )
 ```
 
