@@ -22,6 +22,7 @@ from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools import bot_management as bot_management_tools
 from hummingbot_mcp.tools import controllers as controllers_tools
+from hummingbot_mcp.tools import executors as executors_tools
 from hummingbot_mcp.tools import market_data as market_data_tools
 from hummingbot_mcp.tools import portfolio as portfolio_tools
 from hummingbot_mcp.tools import trading as trading_tools
@@ -1456,6 +1457,157 @@ async def manage_gateway_clmm_positions(
         error_msg = f"Failed to manage gateway CLMM positions: {str(e)}"
         error_msg += "\n\n💡 Check gateway logs for more details: manage_gateway_container(action='get_logs')"
         raise ToolError(error_msg)
+
+
+@mcp.tool()
+async def manage_executors(
+        action: Literal["list_types", "get_schema", "search", "get_summary", "get_executor", "create", "stop", "delete", "get_positions_summary", "get_position_held", "clear_position_held"],
+        # For get_schema
+        executor_type: str | None = None,
+        # For get_executor, stop, delete
+        executor_id: str | None = None,
+        # For create
+        executor_config: dict[str, Any] | None = None,
+        # For stop
+        keep_position: bool = False,
+        # For search filters
+        executor_ids: list[str] | None = None,
+        controller_id: str | None = None,
+        executor_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        is_active: bool | None = None,
+        is_archived: bool | None = None,
+        trading_pair: str | None = None,
+        connector_name: str | None = None,
+        account_name: str | None = None,
+        side: str | None = None,
+        start_time_from: int | None = None,
+        start_time_to: int | None = None,
+        end_time_from: int | None = None,
+        end_time_to: int | None = None,
+) -> str:
+    """Unified tool for managing trading executors - automated trading objects that execute specific strategies.
+
+    Executors are powerful automation components that handle trading logic:
+    - PositionExecutor: Single position with triple barrier (TP/SL/Time) risk management
+    - GridExecutor: Grid trading with multiple price levels
+    - DCAExecutor: Dollar-cost averaging at multiple entry points
+    - ArbitrageExecutor: Cross-exchange arbitrage
+    - TWAPExecutor: Time-weighted average price execution
+    - XEMMExecutor: Cross-exchange market making
+    - OrderExecutor: Simple order execution (market, limit, chaser)
+
+    Actions:
+    - list_types: List all available executor types with descriptions
+    - get_schema: Get configuration schema for a specific executor type (requires executor_type)
+    - search: Search executors with filters (is_active, statuses, trading_pair, etc.)
+    - get_summary: Get summary statistics of all executors
+    - get_executor: Get details of a specific executor (requires executor_id)
+    - create: Create a new executor (requires executor_config)
+    - stop: Stop a running executor (requires executor_id, optional keep_position)
+    - delete: Delete an executor (requires executor_id)
+    - get_positions_summary: Get summary of all position holds across executors
+    - get_position_held: Get position held for specific connector/pair (requires connector_name, trading_pair)
+    - clear_position_held: Clear position held for specific connector/pair (requires connector_name, trading_pair)
+
+    Args:
+        action: Action to perform
+        executor_type: Executor type for get_schema (e.g., 'position_executor', 'grid_executor')
+        executor_id: Executor ID for get_executor, stop, delete actions
+        executor_config: Configuration dict for create action (must include 'type' field)
+        keep_position: Whether to keep position when stopping executor (default: False)
+        executor_ids: Filter by specific executor IDs
+        controller_id: Filter by controller ID
+        executor_types: Filter by executor types
+        statuses: Filter by statuses (e.g., ['RUNNING', 'COMPLETED'])
+        is_active: Filter by active state
+        is_archived: Filter by archived state
+        trading_pair: Filter by trading pair
+        connector_name: Filter by connector name
+        account_name: Account name for operations
+        side: Filter by side (BUY/SELL)
+        start_time_from: Filter by start time (unix timestamp)
+        start_time_to: Filter by start time (unix timestamp)
+        end_time_from: Filter by end time (unix timestamp)
+        end_time_to: Filter by end time (unix timestamp)
+
+    Example executor_config for PositionExecutor:
+    {
+        "type": "position_executor",
+        "trading_pair": "BTC-USDT",
+        "connector_name": "binance_perpetual",
+        "side": 1,  # 1=BUY, 2=SELL
+        "amount": "0.01",
+        "leverage": 10,
+        "triple_barrier_config": {
+            "stop_loss": "0.02",
+            "take_profit": "0.04",
+            "time_limit": 3600
+        }
+    }
+    """
+    try:
+        client = await hummingbot_client.get_client()
+
+        # Route to appropriate function based on action
+        if action in ["list_types", "get_schema", "search", "get_summary", "get_executor"]:
+            result = await executors_tools.explore_executors(
+                client=client,
+                action=action,
+                executor_type=executor_type,
+                executor_id=executor_id,
+                executor_ids=executor_ids,
+                controller_id=controller_id,
+                executor_types=executor_types,
+                statuses=statuses,
+                is_active=is_active,
+                is_archived=is_archived,
+                trading_pair=trading_pair,
+                connector_name=connector_name,
+                account_name=account_name,
+                side=side,
+                start_time_from=start_time_from,
+                start_time_to=start_time_to,
+                end_time_from=end_time_from,
+                end_time_to=end_time_to,
+            )
+            return result.get("formatted_output", str(result))
+
+        elif action in ["create", "stop", "delete"]:
+            result = await executors_tools.manage_executors(
+                client=client,
+                action=action,
+                executor_config=executor_config,
+                executor_id=executor_id,
+                keep_position=keep_position,
+                account_name=account_name,
+            )
+            return result.get("message", str(result))
+
+        elif action in ["get_positions_summary", "get_position_held", "clear_position_held"]:
+            # Map action names to position hold actions
+            position_action_map = {
+                "get_positions_summary": "get_summary",
+                "get_position_held": "get_position",
+                "clear_position_held": "clear_position",
+            }
+            result = await executors_tools.manage_position_holds(
+                client=client,
+                action=position_action_map[action],
+                connector_name=connector_name,
+                trading_pair=trading_pair,
+                account_name=account_name,
+            )
+            return result.get("formatted_output", str(result))
+
+        else:
+            return f"Error: Invalid action '{action}'"
+
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"manage_executors failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage executors: {str(e)}")
 
 
 async def main():
