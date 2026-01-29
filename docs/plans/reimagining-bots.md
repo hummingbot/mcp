@@ -844,6 +844,150 @@ Current PnL: {pnl_percent}%
 
 ---
 
+## Integrating Skills into Your Agent
+
+This section explains how to add Hummingbot skills to your AI agent, following the [Agent Skills integration guide](https://agentskills.io/integrate-skills).
+
+### Integration Approaches
+
+**Filesystem-Based Agents** (Claude Code, Cursor, terminal tools):
+- Skills activate when the model reads `SKILL.md` via shell commands
+- Example: `cat /path/to/skills/executors/SKILL.md`
+- Scripts execute via standard shell commands
+
+**Tool-Based Agents** (custom implementations):
+- Implement tools for skill discovery and activation
+- Load skill metadata into context at startup
+- Execute scripts through your tool framework
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/hummingbot/mcp.git
+cd mcp/skills
+```
+
+### Step 2: Discover Skills at Startup
+
+Parse only the YAML frontmatter from each `SKILL.md` to keep context minimal:
+
+```python
+import yaml
+from pathlib import Path
+
+def discover_skills(skills_dir: str) -> list:
+    """Scan for skills, extracting only metadata."""
+    skills = []
+    for skill_folder in Path(skills_dir).iterdir():
+        skill_file = skill_folder / "SKILL.md"
+        if skill_file.exists():
+            content = skill_file.read_text()
+            # Extract YAML frontmatter
+            if content.startswith("---"):
+                end = content.find("---", 3)
+                frontmatter = yaml.safe_load(content[3:end])
+                skills.append({
+                    "name": frontmatter.get("name"),
+                    "description": frontmatter.get("description"),
+                    "triggers": frontmatter.get("triggers", []),
+                    "path": str(skill_file)
+                })
+    return skills
+```
+
+### Step 3: Inject into System Prompt
+
+Include available skills in your agent's system prompt:
+
+```xml
+<available_skills>
+  <skill>
+    <name>hummingbot-setup</name>
+    <description>Deploy and configure Hummingbot infrastructure</description>
+    <location>/home/user/mcp/skills/setup/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>hummingbot-keys</name>
+    <description>Manage exchange API credentials</description>
+    <location>/home/user/mcp/skills/keys/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>hummingbot-executors</name>
+    <description>Create and manage trading executors</description>
+    <location>/home/user/mcp/skills/executors/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>hummingbot-candles</name>
+    <description>Market data and technical indicators</description>
+    <location>/home/user/mcp/skills/candles/SKILL.md</location>
+  </skill>
+</available_skills>
+```
+
+### Step 4: Match User Intent to Skills
+
+When a user request matches a skill's triggers or description, load the full skill:
+
+```python
+def activate_skill(skill_path: str) -> str:
+    """Load complete skill instructions into context."""
+    return Path(skill_path).read_text()
+
+# Example: User says "I want to create a position executor"
+# Agent recognizes "executor" trigger → loads executors skill
+skill_content = activate_skill("/home/user/mcp/skills/executors/SKILL.md")
+```
+
+### Step 5: Execute Skill Scripts
+
+Skills include shell scripts that call the Hummingbot API directly:
+
+```bash
+# Example: Create a position executor
+./skills/executors/scripts/create_executor.sh \
+    --type position_executor \
+    --connector binance_perpetual \
+    --pair BTC-USDT \
+    --side BUY \
+    --amount 0.001 \
+    --stop-loss 0.02 \
+    --take-profit 0.04
+```
+
+### CLI Helper: Generate Prompt XML
+
+```bash
+#!/bin/bash
+# Generate <available_skills> XML from skills directory
+
+SKILLS_DIR="${1:-./skills}"
+
+echo "<available_skills>"
+for skill_dir in "$SKILLS_DIR"/*/; do
+    if [ -f "$skill_dir/SKILL.md" ]; then
+        name=$(grep "^name:" "$skill_dir/SKILL.md" | head -1 | cut -d':' -f2- | xargs)
+        desc=$(grep "^description:" "$skill_dir/SKILL.md" | head -1 | cut -d':' -f2- | xargs)
+        echo "  <skill>"
+        echo "    <name>$name</name>"
+        echo "    <description>$desc</description>"
+        echo "    <location>$(realpath "$skill_dir/SKILL.md")</location>"
+        echo "  </skill>"
+    fi
+done
+echo "</available_skills>"
+```
+
+### Context Efficiency Summary
+
+| What | Context Cost |
+|------|--------------|
+| Skill metadata (startup) | ~100 tokens per skill |
+| Full skill (on activation) | <5,000 tokens |
+| Script execution | Output only |
+| **Total for 4 skills** | **~400 tokens** (vs ~20,000 for MCP) |
+
+---
+
 ## Implementation Phases
 
 ### Phase 1: Foundation (Weeks 1-2)
