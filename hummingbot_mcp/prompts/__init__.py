@@ -10,6 +10,7 @@ from .first_bot import register_first_bot_prompts
 from .add_exchange import register_add_exchange_prompts
 from .troubleshoot import register_troubleshoot_prompts
 from .grid_executor import register_grid_executor_prompts
+from .position_executor import register_position_executor_prompts
 
 
 def register_all_prompts(mcp):
@@ -19,3 +20,4 @@ def register_all_prompts(mcp):
     register_add_exchange_prompts(mcp)
     register_troubleshoot_prompts(mcp)
     register_grid_executor_prompts(mcp)
+    register_position_executor_prompts(mcp)
