@@ -147,17 +147,13 @@ Skills employ **lazy loading**:
 
 This means an agent can have access to **hundreds of skills** without overwhelming context—impossible with eager-loaded MCP tools.
 
-### When MCP Still Makes Sense
+### Why Not a Hybrid Approach?
 
-MCP remains valuable for:
-- **Real-time external data** — Live API calls, database queries
-- **Multi-system orchestration** — Connecting disparate services
-- **Shared infrastructure** — Team-wide tool access
-- **Legacy integration** — Existing systems without Skills support
+One might think: "Use Skills for knowledge, MCP for execution." This doesn't work because **MCP tools are always loaded into context**, regardless of whether they're used. Adding Skills on top of MCP doesn't reduce context consumption—it increases it.
 
-### Our Hybrid Approach
+### Our Approach: Skills Replace MCP
 
-We use **both**, with clear separation:
+Skills call the **Hummingbot API directly** via scripts, completely bypassing MCP:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -165,26 +161,56 @@ We use **both**, with clear separation:
 │                                                              │
 │   • Procedural knowledge (how to trade, when to rebalance)  │
 │   • Strategy logic (entry/exit conditions, risk rules)      │
-│   • Workflow orchestration (setup sequences, diagnostics)    │
-│   • Domain expertise (indicator interpretation, sizing)      │
+│   • Workflow orchestration (setup sequences, diagnostics)   │
+│   • Domain expertise (indicator interpretation, sizing)     │
 │                                                              │
 │   Context cost: ~100-5000 tokens per active skill           │
 └─────────────────────────────────────────────────────────────┘
                               │
+                              │ Scripts call API directly
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     MCP SERVER LAYER                         │
+│                    HUMMINGBOT API                            │
 │                                                              │
-│   • Deterministic execution (place order, fetch price)      │
-│   • External connectivity (exchange APIs, blockchain)        │
-│   • Data retrieval (candles, order books, positions)         │
-│   • System operations (container management, health checks)  │
+│   • REST endpoints for all trading operations               │
+│   • Exchange connectivity (CEX + DEX via Gateway)           │
+│   • Bot orchestration and management                        │
+│   • Market data and portfolio queries                       │
 │                                                              │
-│   Called by skills, not loaded into context                  │
+│   No MCP overhead — direct HTTP calls from skill scripts    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight**: Skills call MCP tools via scripts. The MCP tool definitions don't need to load into the agent's context—skills know how to invoke them.
+**Key insight**: Skills contain scripts that make direct API calls. The agent never loads tool definitions—it loads skill instructions that tell it *how* to call endpoints.
+
+### The Setup Skill: Bootstrapping the Stack
+
+The **Setup Skill** is critical—it handles deploying the Hummingbot API server itself:
+
+```yaml
+skill: setup
+description: Deploy and configure Hummingbot infrastructure
+
+scripts:
+  - deploy_api_server.sh    # Docker compose up
+  - configure_connectors.sh # Exchange API setup
+  - deploy_gateway.sh       # DEX infrastructure
+  - health_check.sh         # Verify all services
+
+workflow:
+  1. Check Docker prerequisites
+  2. Deploy API server (PostgreSQL, EMQX, API)
+  3. Configure exchange connectors
+  4. (Optional) Deploy Gateway for DEX
+  5. Verify all endpoints responding
+  6. Return connection details to agent
+```
+
+This creates a clean bootstrap sequence:
+1. Agent loads Setup Skill (~100 tokens)
+2. Agent runs setup scripts (output only enters context)
+3. API server is now running
+4. Other skills can call API endpoints directly
 
 ### Simon Willison's Prediction
 
