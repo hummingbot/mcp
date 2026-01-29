@@ -6,6 +6,204 @@ This plan outlines the evolution from the current controller-based bot architect
 
 ---
 
+## Motivation: The Complexity Problem
+
+> *"Running automated trading bots can be complex."*
+> — [Hummingbot YouTube Tutorial](https://youtu.be/Y7-tX1OKfKs?si=ywgE53Tr8rNtGSUI)
+
+### The Current Reality
+
+Setting up and running automated trading bots remains a significant barrier for most traders. Despite Hummingbot's powerful capabilities, the onboarding experience demands substantial technical expertise:
+
+#### Technical Barriers
+
+| Barrier | Description |
+|---------|-------------|
+| **Command-Line Interface** | No graphical interface; CLI can be "daunting" for non-technical users |
+| **Docker Knowledge** | Recommended installation requires Docker familiarity and container management |
+| **Multi-Component Setup** | Full deployment involves 4+ containers: API server, PostgreSQL, EMQX broker, Gateway |
+| **API Key Management** | Each exchange requires generating, securing, and configuring API credentials |
+| **Gateway Complexity** | DEX trading adds blockchain engineering requirements: wallets, SSL certificates, chain configs |
+
+#### Setup Steps for a Basic Bot
+
+A typical Hummingbot deployment requires:
+
+```
+1. Install Docker Desktop
+2. Clone hummingbot-api repository
+3. Run setup script (pulls 4+ Docker images)
+4. Configure Telegram bot (optional but recommended)
+5. Set API server credentials
+6. Generate and add exchange API keys
+7. Configure connectors for each exchange
+8. (For DEX) Set up Gateway with:
+   - Wallet configuration
+   - Chain/network selection
+   - Connector configuration (Jupiter, Uniswap, etc.)
+   - SSL certificates for production
+9. Create controller configuration
+10. Deploy and monitor bot
+```
+
+#### Who Gets Left Behind
+
+According to [community reviews](https://yourrobotrader.com/en/hummingbot-review/):
+
+- *"The initial setup may require technical knowledge, especially for users unfamiliar with command-line interfaces."*
+- *"HummingBot does not have a user-friendly interface... The onboarding is brutal for users without any technical expertise."*
+- *"Launching a bot can be a difficult task for those who do not have any prior experience with GitHub, coding, and using various applications."*
+- *"Users who lack the expertise... should stick to using services that have customizable ready-made robots that you can launch in a couple of clicks."*
+
+### The Opportunity
+
+The gap between "a couple of clicks" and "multi-container Docker deployment" represents a massive opportunity. **AI agents can bridge this gap** by:
+
+1. **Abstracting complexity** — Natural language replaces CLI commands
+2. **Progressive disclosure** — Only show what's needed, when it's needed
+3. **Error recovery** — AI can diagnose and fix configuration issues
+4. **Guided setup** — Step-by-step assistance instead of documentation diving
+
+### Vision
+
+Transform the experience from:
+```
+"Read the docs → Install Docker → Clone repo → Configure YAML → Debug errors → Deploy"
+```
+
+To:
+```
+"Tell the agent what you want to trade → Agent handles the rest"
+```
+
+---
+
+## Why Skills Over MCP: A Critical Design Decision
+
+This architecture adopts the **Agent Skills** pattern rather than expanding the existing MCP server. This is a deliberate choice based on extensive analysis of both approaches.
+
+### Background: MCP vs Skills
+
+| Aspect | MCP (Model Context Protocol) | Agent Skills |
+|--------|------------------------------|--------------|
+| **What it is** | Protocol for connecting AI to external services | Markdown files teaching AI how to do things |
+| **Analogy** | "The plumbing" — what tools are available | "The brain" — how to use tools effectively |
+| **Created by** | Anthropic (2024) | Anthropic (2025), now an [open standard](https://agentskills.io) |
+| **Adoption** | Wide (Claude, Cursor, many tools) | Growing (Microsoft, OpenAI, GitHub, Cursor, VS Code) |
+
+### The Context Window Problem
+
+As [Simon Willison notes](https://simonwillison.net/2025/Oct/16/claude-skills/):
+
+> *"GitHub's official MCP on its own famously consumes tens of thousands of tokens of context."*
+
+**MCP Context Cost:**
+- Simple tools: ~150-250 tokens each
+- Medium tools: ~300-500 tokens each
+- Complex tools: ~500-800 tokens each
+- Full Playwright MCP: **~8,000-10,000 tokens**
+- GitHub MCP: **~20,000+ tokens**
+
+**Skills Context Cost:**
+- Skill metadata only: **~100 tokens**
+- Full skill (when activated): **<5,000 tokens**
+- Script execution output only (code never enters context)
+
+The current Hummingbot MCP server has 24 tools. At current rates, that's potentially **12,000-20,000 tokens** just for tool definitions—before any actual work begins.
+
+### Installation Complexity
+
+**MCP Installation:**
+```bash
+# Requires running server processes
+npm install @modelcontextprotocol/server-xyz
+# Configure .mcp.json with server paths
+# Manage server lifecycle (start/stop/restart)
+# Handle authentication between client and servers
+# Debug connection issues
+```
+
+**Skills Installation:**
+```bash
+# Just files in a directory
+~/.claude/skills/
+  my-skill/
+    SKILL.md      # Instructions + metadata
+    scripts/      # Optional executable scripts
+    references/   # Optional documentation
+```
+
+As [Armin Ronacher observes](https://lucumr.pocoo.org/2025/12/13/skills-vs-mcp/):
+
+> *"The skills pattern outperforms MCP in current practice, primarily because it leverages existing agent capabilities without introducing new tool-definition mechanisms."*
+
+### Progressive Disclosure
+
+Skills employ **lazy loading**:
+
+1. **Initially**: Only skill names and brief descriptions load (~100 tokens per skill)
+2. **On relevance**: Full SKILL.md content loads (<5k tokens)
+3. **On execution**: Scripts run, only **output** enters context (code stays out)
+
+This means an agent can have access to **hundreds of skills** without overwhelming context—impossible with eager-loaded MCP tools.
+
+### When MCP Still Makes Sense
+
+MCP remains valuable for:
+- **Real-time external data** — Live API calls, database queries
+- **Multi-system orchestration** — Connecting disparate services
+- **Shared infrastructure** — Team-wide tool access
+- **Legacy integration** — Existing systems without Skills support
+
+### Our Hybrid Approach
+
+We use **both**, with clear separation:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        SKILLS LAYER                          │
+│                                                              │
+│   • Procedural knowledge (how to trade, when to rebalance)  │
+│   • Strategy logic (entry/exit conditions, risk rules)      │
+│   • Workflow orchestration (setup sequences, diagnostics)    │
+│   • Domain expertise (indicator interpretation, sizing)      │
+│                                                              │
+│   Context cost: ~100-5000 tokens per active skill           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     MCP SERVER LAYER                         │
+│                                                              │
+│   • Deterministic execution (place order, fetch price)      │
+│   • External connectivity (exchange APIs, blockchain)        │
+│   • Data retrieval (candles, order books, positions)         │
+│   • System operations (container management, health checks)  │
+│                                                              │
+│   Called by skills, not loaded into context                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key insight**: Skills call MCP tools via scripts. The MCP tool definitions don't need to load into the agent's context—skills know how to invoke them.
+
+### Simon Willison's Prediction
+
+> *"I'm expecting a Cambrian explosion in Skills that will make this year's MCP rush look pedestrian by comparison."*
+> — [Simon Willison, October 2025](https://simonwillison.net/2025/Oct/16/claude-skills/)
+
+By building on Skills now, we position Hummingbot at the forefront of this shift.
+
+### References
+
+- [Agent Skills Specification](https://agentskills.io/specification)
+- [Simon Willison: Claude Skills are awesome](https://simonwillison.net/2025/Oct/16/claude-skills/)
+- [Armin Ronacher: Skills vs Dynamic MCP Loadouts](https://lucumr.pocoo.org/2025/12/13/skills-vs-mcp/)
+- [Claude Blog: Skills Explained](https://claude.com/blog/skills-explained)
+- [IntuitionLabs: Claude Skills vs MCP Technical Comparison](https://intuitionlabs.ai/articles/claude-skills-vs-mcp)
+- [DEV.to: Skills, MCPs, and Commands](https://dev.to/gvegacl/skills-mcps-and-commands-are-the-same-context-engineering-trend-49dp)
+
+---
+
 ## Current Architecture (Legacy)
 
 The existing Hummingbot architecture follows a monolithic controller pattern:
