@@ -148,7 +148,7 @@ After completing these steps, the user should have:
 - Swagger docs accessible at http://localhost:8000/docs
 - MCP server connected and ready to use
 
-Next steps: Use the `add_exchange` prompt to connect exchange accounts, or `first_bot` to create a trading bot.
+Next steps: Use `setup_connector` to add exchange credentials, or `/grid_executor` or `/position_executor` to create a trading bot.
 """
 
     @mcp.prompt()

@@ -7,11 +7,173 @@ prices, candles, funding rates, and order books.
 from datetime import datetime
 from typing import Any, Literal
 
+from pydantic import BaseModel, Field, field_validator
+
 from hummingbot_mcp.formatters import (
     format_candles_as_table,
     format_order_book_as_table,
     format_prices_as_table,
 )
+
+
+class CandlesFeedRequest(BaseModel):
+    """Request model for managing candle feeds with progressive disclosure.
+
+    This model supports a multi-step flow:
+    1. No parameters → Show settings, available connectors, and active feeds
+    2. Connector only → Show active feeds for connector, prompt for trading pair
+    3. Connector + trading_pair → Start feed with default interval (1h)
+    4. All parameters → Start feed with specified interval and days
+    """
+
+    connector: str | None = Field(
+        default=None,
+        description="Exchange connector (e.g., 'binance_perpetual'). Leave empty to list available connectors.",
+    )
+
+    trading_pair: str | None = Field(
+        default=None,
+        description="Trading pair (e.g., 'BTC-USDT'). Required to start a feed.",
+    )
+
+    interval: str = Field(
+        default="1h",
+        description="Candle interval: 1m, 5m, 15m, 30m, 1h, 4h, 1d (default: 1h)",
+    )
+
+    days: int = Field(
+        default=30,
+        description="Days of historical data to fetch (default: 30)",
+        ge=1,
+        le=365,
+    )
+
+    @field_validator("connector")
+    @classmethod
+    def validate_connector(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.lower().replace(" ", "_").replace("-", "_")
+        return v
+
+    @field_validator("trading_pair")
+    @classmethod
+    def validate_trading_pair(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.upper().replace("_", "-").replace("/", "-")
+        return v
+
+    @field_validator("interval")
+    @classmethod
+    def validate_interval(cls, v: str) -> str:
+        valid_intervals = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"]
+        if v not in valid_intervals:
+            raise ValueError(f"Invalid interval '{v}'. Valid: {valid_intervals}")
+        return v
+
+    def get_flow_stage(self) -> str:
+        """Determine which stage of the setup flow we're in."""
+        if self.connector is None:
+            return "list_connectors"
+        elif self.trading_pair is None:
+            return "show_connector_feeds"
+        else:
+            return "start_feed"
+
+
+async def manage_candles_feed(client: Any, request: CandlesFeedRequest) -> dict[str, Any]:
+    """Manage candle feeds with progressive disclosure.
+
+    Flow:
+    1. No params → Settings + available connectors + active feeds
+    2. Connector only → Active feeds for connector + prompt for trading pair
+    3. Connector + trading_pair → Start/refresh feed
+    """
+    flow_stage = request.get_flow_stage()
+
+    if flow_stage == "list_connectors":
+        # Step 1: Show settings, available connectors, and all active feeds
+        settings = await client.market_data.get_market_data_settings()
+        connectors = await client.market_data.get_available_candle_connectors()
+        active_feeds = await client.market_data.get_active_feeds()
+
+        return {
+            "action": "list_connectors",
+            "settings": settings,
+            "connectors": connectors,
+            "active_feeds": active_feeds.get("active_feeds", {}),
+            "total_connectors": len(connectors),
+            "total_active_feeds": len(active_feeds.get("active_feeds", {})),
+            "next_step": "Provide a connector to see its feeds or start a new one",
+            "example": "candles_feed(connector='binance_perpetual')",
+        }
+
+    elif flow_stage == "show_connector_feeds":
+        # Step 2: Show active feeds for this connector, prompt for trading pair
+        active_feeds = await client.market_data.get_active_feeds()
+        all_feeds = active_feeds.get("active_feeds", {})
+
+        # Filter feeds for this connector
+        connector_feeds = {
+            k: v for k, v in all_feeds.items()
+            if k.startswith(request.connector)
+        }
+
+        return {
+            "action": "show_connector_feeds",
+            "connector": request.connector,
+            "active_feeds": connector_feeds,
+            "total_feeds": len(connector_feeds),
+            "next_step": "Provide a trading pair to start or refresh a feed",
+            "example": f"candles_feed(connector='{request.connector}', trading_pair='BTC-USDT')",
+            "intervals": ["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
+            "default_interval": "1h",
+            "default_days": 30,
+        }
+
+    else:
+        # Step 3: Start/refresh the candle feed
+        # Calculate max records based on interval
+        interval = request.interval
+        days = request.days
+
+        if interval.endswith("m"):
+            max_records = 1440 * days
+        elif interval.endswith("h"):
+            max_records = 24 * days
+        elif interval.endswith("d"):
+            max_records = days
+        elif interval.endswith("w"):
+            max_records = days // 7
+        else:
+            max_records = 24 * days  # Default to hourly
+
+        # Adjust for interval multiplier
+        interval_num = interval[:-1]
+        if interval_num and interval_num.isdigit():
+            max_records = max(1, int(max_records / int(interval_num)))
+
+        # Start the feed
+        candles = await client.market_data.get_candles(
+            connector_name=request.connector,
+            trading_pair=request.trading_pair,
+            interval=interval,
+            max_records=max_records,
+        )
+
+        # Get updated active feeds
+        active_feeds = await client.market_data.get_active_feeds()
+
+        return {
+            "action": "feed_started",
+            "connector": request.connector,
+            "trading_pair": request.trading_pair,
+            "interval": interval,
+            "days": days,
+            "candles": candles,
+            "total_candles": len(candles),
+            "active_feeds": active_feeds.get("active_feeds", {}),
+            "feed_key": f"{request.connector}:{request.trading_pair}:{interval}",
+        }
 
 
 async def get_prices(
@@ -170,6 +332,19 @@ async def get_funding_rate(
         "index_price": funding_rate.get("index_price", 0),
         "next_funding_time": time_str,
     }
+
+
+async def get_active_feeds(client: Any) -> dict[str, Any]:
+    """
+    Get information about currently active market data feeds.
+
+    Args:
+        client: Hummingbot API client
+
+    Returns:
+        Dictionary containing active feeds information
+    """
+    return await client.market_data.get_active_feeds()
 
 
 async def get_order_book(

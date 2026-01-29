@@ -16,6 +16,7 @@ from hummingbot_mcp.exceptions import MaxConnectionsAttemptError as HBConnection
 from hummingbot_mcp.formatters import (
     format_active_bots_as_table,
     format_bot_logs_as_table,
+    format_candles_as_table,
     format_portfolio_as_table,
 )
 from hummingbot_mcp.hummingbot_client import hummingbot_client
@@ -884,38 +885,132 @@ async def get_prices(connector_name: str, trading_pairs: list[str]) -> str:
 
 
 @mcp.tool()
-async def get_candles(connector_name: str, trading_pair: str, interval: str = "1h", days: int = 30) -> str:
-    """Get the real-time candles for a trading pair on a specific exchange connector.
+async def candles_feed(
+        connector: str | None = None,
+        trading_pair: str | None = None,
+        interval: str = "1h",
+        days: int = 30,
+) -> str:
+    """Start and maintain candle data feeds using progressive disclosure.
+
+    This tool manages real-time candle feeds with a multi-step flow:
+    1. No parameters → Show settings, available connectors, and active feeds
+    2. Connector only → Show active feeds for connector, prompt for trading pair
+    3. All parameters → Start/refresh the candle feed
+
+    The API automatically maintains feeds once started. Feeds expire when unused.
+
     Args:
-        connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
-        trading_pair: Trading pair to get candles for (e.g., 'BTC-USDT')
-        interval: Candle interval (default: '1h'). Options include '1m', '5m', '15m', '30m', '1h', '4h', '1d'.
-        days: Number of days of historical data to retrieve (default: 30).
+        connector: Exchange connector (e.g., 'binance_perpetual'). Leave empty to list connectors.
+        trading_pair: Trading pair (e.g., 'BTC-USDT'). Required to start a feed.
+        interval: Candle interval: 1m, 5m, 15m, 30m, 1h, 4h, 1d (default: 1h)
+        days: Days of historical data (default: 30, max: 365)
     """
     try:
-        client = await hummingbot_client.get_client()
-        result = await market_data_tools.get_candles(
-            client=client,
-            connector_name=connector_name,
+        from hummingbot_mcp.tools.market_data import CandlesFeedRequest, manage_candles_feed
+
+        # Validate and create request
+        request = CandlesFeedRequest(
+            connector=connector,
             trading_pair=trading_pair,
             interval=interval,
             days=days,
         )
 
-        summary = (
-            f"Candles for {result['trading_pair']} on {result['connector_name']}:\n"
-            f"Interval: {result['interval']}\n"
-            f"Total Candles: {result['total_candles']}\n\n"
-            f"{result['candles_table']}"
-        )
+        client = await hummingbot_client.get_client()
+        result = await manage_candles_feed(client, request)
 
-        return summary
+        action = result.get("action", "")
+
+        if action == "list_connectors":
+            # Format connectors in columns
+            connectors = result.get("connectors", [])
+            connector_lines = []
+            for i in range(0, len(connectors), 3):
+                line = "  ".join(f"{c:25}" for c in connectors[i:i + 3])
+                connector_lines.append(line)
+
+            # Format active feeds
+            active_feeds = result.get("active_feeds", {})
+            feeds_section = ""
+            if active_feeds:
+                feeds_lines = ["", "Active Feeds:", "-" * 40]
+                for feed_key, feed_info in active_feeds.items():
+                    feeds_lines.append(f"  {feed_key}")
+                    feeds_lines.append(f"    Last Access: {feed_info.get('last_access', 'N/A')}")
+                feeds_section = "\n".join(feeds_lines)
+            else:
+                feeds_section = "\nNo active feeds."
+
+            # Format settings
+            settings = result.get("settings", {})
+            settings_section = (
+                f"\nSettings:\n"
+                f"  Feed Timeout: {settings.get('candles_feed_timeout', 'N/A')}s\n"
+                f"  Cleanup Interval: {settings.get('candles_cleanup_interval', 'N/A')}s"
+            )
+
+            return (
+                f"Candle Feed Manager\n"
+                f"{'=' * 60}\n\n"
+                f"Available Connectors ({result.get('total_connectors', 0)}):\n"
+                + "\n".join(connector_lines) +
+                f"{feeds_section}"
+                f"{settings_section}\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif action == "show_connector_feeds":
+            active_feeds = result.get("active_feeds", {})
+
+            if active_feeds:
+                feeds_lines = [f"Active Feeds for {result.get('connector', '')}:", "-" * 40]
+                for feed_key, feed_info in active_feeds.items():
+                    feeds_lines.append(f"  {feed_key}")
+                    feeds_lines.append(f"    Last Access: {feed_info.get('last_access', 'N/A')}")
+                feeds_section = "\n".join(feeds_lines)
+            else:
+                feeds_section = f"No active feeds for {result.get('connector', '')}."
+
+            return (
+                f"Connector: {result.get('connector', '')}\n"
+                f"{'=' * 40}\n\n"
+                f"{feeds_section}\n\n"
+                f"Available Intervals: {', '.join(result.get('intervals', []))}\n"
+                f"Default Interval: {result.get('default_interval', '1h')}\n"
+                f"Default Days: {result.get('default_days', 30)}\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif action == "feed_started":
+            candles = result.get("candles", [])
+            candles_table = format_candles_as_table(candles) if candles else "No candles"
+
+            return (
+                f"Candle Feed Started\n"
+                f"{'=' * 60}\n\n"
+                f"Connector: {result.get('connector', '')}\n"
+                f"Trading Pair: {result.get('trading_pair', '')}\n"
+                f"Interval: {result.get('interval', '')}\n"
+                f"Days: {result.get('days', '')}\n"
+                f"Total Candles: {result.get('total_candles', 0)}\n"
+                f"Feed Key: {result.get('feed_key', '')}\n\n"
+                f"{candles_table}\n\n"
+                f"Feed is now active. Use get_technical_indicator() to compute RSI, MACD, etc."
+            )
+
+        else:
+            return f"Unknown action: {action}"
+
     except HBConnectionError as e:
-        # Re-raise connection errors with the helpful message from hummingbot_client
+        raise ToolError(str(e))
+    except ValueError as e:
         raise ToolError(str(e))
     except Exception as e:
-        logger.error(f"get_candles failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to get candles: {str(e)}")
+        logger.error(f"candles_feed failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage candle feed: {str(e)}")
 
 
 @mcp.tool()
@@ -949,6 +1044,101 @@ async def get_funding_rate(connector_name: str, trading_pair: str) -> str:
     except Exception as e:
         logger.error(f"get_funding_rate failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to get funding rate: {str(e)}")
+
+
+# ========================================
+# Technical Indicators
+# ========================================
+
+
+@mcp.tool()
+async def get_technical_indicator(
+        connector_name: str,
+        trading_pair: str,
+        interval: str = "1h",
+        indicators: list[str] | None = None,
+        periods: dict[str, int] | None = None,
+        days: int = 30,
+        limit: int = 50,
+) -> str:
+    """Compute technical indicators from candle data.
+
+    Fetches candles from the API and computes indicators. The API automatically
+    maintains the candle feed for efficient subsequent requests.
+
+    Supported Indicators:
+    - RSI: Relative Strength Index (default period: 14)
+    - MACD: Moving Average Convergence Divergence (12/26/9)
+    - BB: Bollinger Bands (default period: 20, std: 2)
+    - SMA: Simple Moving Average (default period: 20)
+    - EMA: Exponential Moving Average (default period: 20)
+    - ATR: Average True Range (default period: 14)
+    - VWAP: Volume Weighted Average Price
+
+    Args:
+        connector_name: Exchange connector (e.g., 'binance_perpetual')
+        trading_pair: Trading pair (e.g., 'BTC-USDT')
+        interval: Candle interval (default: '1h')
+        indicators: List of indicator names (default: ['RSI', 'MACD', 'BB'])
+        periods: Custom periods (e.g., {'RSI': 21, 'SMA': 50})
+        days: Number of days of historical data (default: 30)
+        limit: Number of recent data points to display (default: 50)
+
+    Returns:
+        Table with indicator values and interpretation
+    """
+    try:
+        from hummingbot_mcp.tools.indicators import (
+            compute_indicators,
+            format_indicator_results,
+            SUPPORTED_INDICATORS,
+        )
+
+        # Default indicators
+        if indicators is None:
+            indicators = ["RSI", "MACD", "BB"]
+
+        # Validate indicators
+        for ind in indicators:
+            if ind.upper() not in SUPPORTED_INDICATORS:
+                raise ValueError(
+                    f"Unsupported indicator: {ind}. "
+                    f"Supported: {SUPPORTED_INDICATORS}"
+                )
+
+        # Fetch candles from API (this also starts/maintains the feed)
+        client = await hummingbot_client.get_client()
+        result = await market_data_tools.get_candles(
+            client=client,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            interval=interval,
+            days=days,
+        )
+
+        candles = result.get("candles", [])
+
+        if not candles:
+            raise ToolError(
+                f"No candles returned for {trading_pair} ({interval}) on {connector_name}."
+            )
+
+        # Compute indicators
+        results = compute_indicators(candles, indicators, periods)
+
+        # Format output
+        return format_indicator_results(
+            results,
+            connector_name,
+            trading_pair,
+            interval,
+            limit=min(limit, 20)  # Cap display at 20 rows
+        )
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"get_technical_indicator failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to compute indicators: {str(e)}")
 
 
 @mcp.tool()

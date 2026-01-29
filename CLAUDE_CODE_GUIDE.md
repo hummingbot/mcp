@@ -26,6 +26,80 @@ The MCP server will guide you through the credential setup process.
 
 ---
 
+## Getting Started: Two Key Features
+
+Start by testing these two core capabilities:
+
+### 1. Technical Indicators
+
+Analyze market conditions before trading:
+
+```
+Set up a candle feed for BTC-USDT on Binance perpetual and show me the RSI
+```
+
+```
+What's the MACD and Bollinger Bands for ETH?
+```
+
+### 2. Position Executor
+
+Execute trades with automatic risk management:
+
+```
+Create a position to buy 0.01 BTC with 2% stop loss and 4% take profit
+```
+
+---
+
+## Technical Analysis
+
+### Setting Up Candle Feeds
+
+The `candles_feed` tool uses progressive disclosure to guide you:
+
+**Step 1 - List available connectors:**
+```
+Show me available candle feed connectors
+```
+
+**Step 2 - Check connector feeds:**
+```
+Show me active feeds for Binance perpetual
+```
+
+**Step 3 - Start a feed:**
+```
+Start a candle feed for ETH-USDT on Binance perpetual with 1-hour interval
+```
+
+### Computing Indicators
+
+Once a feed is active, compute technical indicators:
+
+```
+Calculate RSI, MACD, and Bollinger Bands for BTC-USDT
+```
+
+**Supported Indicators:**
+
+| Indicator | Description | Default Period |
+|-----------|-------------|----------------|
+| RSI | Relative Strength Index | 14 |
+| MACD | Moving Avg Convergence Divergence | 12/26/9 |
+| BB | Bollinger Bands | 20, 2 std |
+| SMA | Simple Moving Average | 20 |
+| EMA | Exponential Moving Average | 20 |
+| ATR | Average True Range | 14 |
+| VWAP | Volume Weighted Avg Price | - |
+
+**Custom periods:**
+```
+Show me RSI with 21 period and SMA with 50 period for BTC
+```
+
+---
+
 ## Trading with Bots
 
 Bots are smart trading algorithms that handle order placement, position management, and risk controls. This is the primary way to execute trades.
@@ -208,12 +282,11 @@ Show my active orders
 
 ### Best Practices
 
-1. **Start with Order Bot** - Master simple orders first
-2. **Graduate to Position Bot** - Add risk management
-3. **Always use stop losses** - Triple Barrier makes this easy
-4. **Start small** - Test with small amounts before scaling
-5. **Check balances** - Ensure sufficient funds before trading
-6. **Monitor bots** - Use `list bots` to track positions
+1. **Check indicators first** - Use RSI, MACD to time entries
+2. **Start with Position Bot** - Always use stop losses
+3. **Start small** - Test with small amounts before scaling
+4. **Check balances** - Ensure sufficient funds before trading
+5. **Monitor bots** - Use `list bots` to track positions
 
 ---
 
@@ -327,6 +400,8 @@ Show me the logs for my active bots
 | **Controller** | Strategy template - the code and logic for a trading strategy |
 | **Controller Configuration** | Parameters for a controller - the specific settings (trading pair, amounts, spreads, etc.) |
 | **Controller Instance** | A running deployment with one or more controller configurations |
+| **Candle Feed** | Real-time OHLCV data stream maintained by the API |
+| **Technical Indicator** | Calculated values (RSI, MACD, etc.) derived from candle data |
 
 ---
 
