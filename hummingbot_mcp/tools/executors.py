@@ -21,15 +21,6 @@ from hummingbot_mcp.schemas import ManageExecutorPositionsRequest, ManageExecuto
 
 logger = logging.getLogger("hummingbot-mcp")
 
-# Re-export for backwards compatibility
-__all__ = [
-    "ManageExecutorsRequest",
-    "ManageExecutorPositionsRequest",
-    "EXECUTOR_TYPE_DESCRIPTIONS",
-    "manage_executors",
-    "manage_executor_positions",
-]
-
 # Executor type descriptions for helping users choose the right executor
 EXECUTOR_TYPE_DESCRIPTIONS = {
     "position_executor": {
@@ -43,12 +34,6 @@ EXECUTOR_TYPE_DESCRIPTIONS = {
         "description": "Dollar-cost averages into positions over time with scheduled purchases",
         "use_when": "Accumulating gradually, reducing timing risk, building long-term position",
         "avoid_when": "Need immediate full entry, want quick exits",
-    },
-    "arbitrage_executor": {
-        "name": "arbitrage_executor",
-        "description": "Captures price differences between exchanges or trading pairs",
-        "use_when": "Identified price discrepancies, low-risk profit from inefficiencies",
-        "avoid_when": "Differences too small for fees, insufficient capital on both sides",
     },
     "grid_executor": {
         "name": "grid_executor",
@@ -85,11 +70,34 @@ EXECUTOR_TYPE_DESCRIPTIONS = {
   - Prevents closing positions before reaching the next grid level
   - Default: False (uses take_profit as-is)""",
     },
-    "xemm_executor": {
-        "name": "xemm_executor",
-        "description": "Cross-Exchange Market Making - provides liquidity across multiple exchanges",
-        "use_when": "Want spread earnings, have multi-exchange access, can manage inventory",
-        "avoid_when": "New to market making, cannot monitor positions regularly",
+    "order_executor": {
+        "name": "order_executor",
+        "description": "Simple order execution with retry logic and multiple execution strategies. "
+                       "Closest executor to a plain BUY/SELL order but with strategy options.",
+        "use_when": "Want to place a single buy or sell order with a specific execution strategy "
+                    "(LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER). Best for one-off acquisitions "
+                    "or liquidations with reliable execution.",
+        "avoid_when": "Need complex multi-level strategies (use grid/dca instead), "
+                      "want automated SL/TP management (use position_executor instead)",
+        "notes": """
+**Execution Strategies:**
+- MARKET: Immediate execution at current market price
+- LIMIT: Place a limit order at a specified price
+- LIMIT_MAKER: Post-only limit order (rejected if it would match immediately)
+- LIMIT_CHASER: Continuously chases the best price, refreshing the limit order as the market moves
+
+**LIMIT_CHASER Config (chaser_config):**
+- distance: How far from best price to place the order (e.g., 0.001 = 0.1%)
+- refresh_threshold: How far price must move before refreshing the order (e.g., 0.0005 = 0.05%)
+
+**Key Parameters:**
+- connector_name: Exchange to execute on
+- trading_pair: Trading pair (e.g., 'USDT-BRL')
+- side: 1 (BUY) or 2 (SELL)
+- amount: Order amount (base currency, or '$100' for USD value)
+- execution_strategy: LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER
+- price: Required for LIMIT/LIMIT_MAKER strategies
+- chaser_config: Required for LIMIT_CHASER strategy""",
     },
 }
 

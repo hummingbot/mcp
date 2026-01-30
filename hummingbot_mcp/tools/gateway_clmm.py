@@ -11,20 +11,9 @@ from typing import Any
 
 from hummingbot_mcp.exceptions import ToolError
 from hummingbot_mcp.formatters.base import format_number, get_field
-from hummingbot_mcp.hummingbot_client import hummingbot_client
 from hummingbot_mcp.schemas import GatewayCLMMPoolRequest, GatewayCLMMPositionRequest
 
 logger = logging.getLogger("hummingbot-mcp")
-
-# Re-export for backwards compatibility
-__all__ = [
-    "GatewayCLMMPoolRequest",
-    "GatewayCLMMPositionRequest",
-    "explore_gateway_clmm_pools",
-    "manage_gateway_clmm_positions",
-    "format_pools_as_table",
-    "format_pools_as_detailed_table",
-]
 
 
 def format_pools_as_table(pools: list[dict[str, Any]]) -> str:
@@ -120,7 +109,7 @@ def format_pools_as_detailed_table(pools: list[dict[str, Any]]) -> str:
     return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
-async def explore_gateway_clmm_pools(request: GatewayCLMMPoolRequest) -> dict[str, Any]:
+async def explore_gateway_clmm_pools(client: Any, request: GatewayCLMMPoolRequest) -> dict[str, Any]:
     """
     Explore Gateway CLMM pools: list pools and get pool information.
 
@@ -133,85 +122,75 @@ async def explore_gateway_clmm_pools(request: GatewayCLMMPoolRequest) -> dict[st
     - raydium (Solana): CLMM pools
     - uniswap (Ethereum/EVM): V3 pools
     """
-    try:
-        client = await hummingbot_client.get_client()
+    # ============================================
+    # LIST POOLS - Browse available pools
+    # ============================================
+    if request.action == "list_pools":
+        result = await client.gateway_clmm.get_pools(
+            connector=request.connector,
+            page=request.page,
+            limit=request.limit,
+            search_term=request.search_term,
+            sort_key=request.sort_key,
+            order_by=request.order_by,
+            include_unknown=request.include_unknown
+        )
 
-        # ============================================
-        # LIST POOLS - Browse available pools
-        # ============================================
-        if request.action == "list_pools":
-            result = await client.gateway_clmm.get_pools(
-                connector=request.connector,
-                page=request.page,
-                limit=request.limit,
-                search_term=request.search_term,
-                sort_key=request.sort_key,
-                order_by=request.order_by,
-                include_unknown=request.include_unknown
-            )
+        pools = result.get("pools", [])
 
-            pools = result.get("pools", [])
-
-            # Format as detailed table if detailed mode is enabled
-            if request.detailed:
-                formatted_table = format_pools_as_detailed_table(pools)
-            else:
-                # Otherwise format as simplified table
-                formatted_table = format_pools_as_table(pools)
-
-            return {
-                "action": "list_pools",
-                "connector": request.connector,
-                "filters": {
-                    "search_term": request.search_term,
-                    "sort_key": request.sort_key,
-                    "order_by": request.order_by,
-                    "include_unknown": request.include_unknown
-                },
-                "pagination": {
-                    "page": request.page,
-                    "limit": request.limit,
-                    "total": result.get("total", 0)
-                },
-                "pools_table": formatted_table
-            }
-
-        # ============================================
-        # GET POOL INFO - Get detailed pool information
-        # ============================================
-        elif request.action == "get_pool_info":
-            # Validate required parameters
-            if not request.network:
-                raise ToolError("network is required for get_pool_info action")
-            if not request.pool_address:
-                raise ToolError("pool_address is required for get_pool_info action")
-
-            result = await client.gateway_clmm.get_pool_info(
-                connector=request.connector,
-                network=request.network,
-                pool_address=request.pool_address
-            )
-
-            return {
-                "action": "get_pool_info",
-                "connector": request.connector,
-                "network": request.network,
-                "pool_address": request.pool_address,
-                "result": result
-            }
-
+        # Format as detailed table if detailed mode is enabled
+        if request.detailed:
+            formatted_table = format_pools_as_detailed_table(pools)
         else:
-            raise ToolError(f"Unknown action: {request.action}")
+            # Otherwise format as simplified table
+            formatted_table = format_pools_as_table(pools)
 
-    except Exception as e:
-        if isinstance(e, ToolError):
-            raise
-        else:
-            logger.error(f"Error in explore_gateway_clmm_pools: {str(e)}", exc_info=True)
-            raise ToolError(f"Gateway CLMM pool exploration failed: {str(e)}")
+        return {
+            "action": "list_pools",
+            "connector": request.connector,
+            "filters": {
+                "search_term": request.search_term,
+                "sort_key": request.sort_key,
+                "order_by": request.order_by,
+                "include_unknown": request.include_unknown
+            },
+            "pagination": {
+                "page": request.page,
+                "limit": request.limit,
+                "total": result.get("total", 0)
+            },
+            "pools_table": formatted_table
+        }
+
+    # ============================================
+    # GET POOL INFO - Get detailed pool information
+    # ============================================
+    elif request.action == "get_pool_info":
+        # Validate required parameters
+        if not request.network:
+            raise ToolError("network is required for get_pool_info action")
+        if not request.pool_address:
+            raise ToolError("pool_address is required for get_pool_info action")
+
+        result = await client.gateway_clmm.get_pool_info(
+            connector=request.connector,
+            network=request.network,
+            pool_address=request.pool_address
+        )
+
+        return {
+            "action": "get_pool_info",
+            "connector": request.connector,
+            "network": request.network,
+            "pool_address": request.pool_address,
+            "result": result
+        }
+
+    else:
+        raise ToolError(f"Unknown action: {request.action}")
 
 
-async def manage_gateway_clmm_positions(request: GatewayCLMMPositionRequest) -> dict[str, Any]:
+async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMPositionRequest) -> dict[str, Any]:
     """
     Manage Gateway CLMM positions: open, close, collect fees, and get positions.
 
@@ -222,8 +201,6 @@ async def manage_gateway_clmm_positions(request: GatewayCLMMPositionRequest) -> 
     - get_positions: Get all positions owned by a wallet for a specific pool (real-time data from blockchain)
     """
     try:
-        client = await hummingbot_client.get_client()
-
         # ============================================
         # OPEN POSITION - Create new position
         # ============================================
@@ -349,40 +326,39 @@ async def manage_gateway_clmm_positions(request: GatewayCLMMPositionRequest) -> 
         else:
             raise ToolError(f"Unknown action: {request.action}")
 
+    except ToolError:
+        raise
     except Exception as e:
-        if isinstance(e, ToolError):
-            raise
-        else:
-            error_message = str(e)
-            logger.error(f"Error in manage_gateway_clmm_positions: {error_message}", exc_info=True)
+        error_message = str(e)
+        logger.error(f"Error in manage_gateway_clmm_positions: {error_message}", exc_info=True)
 
-            # Provide more helpful error messages for common Gateway errors
-            if "'NoneType' object has no attribute 'get'" in error_message:
-                raise ToolError(
-                    f"Gateway CLMM operation failed with internal error.\n\n"
-                    f"⚠️  Gateway Error: {error_message}\n\n"
-                    f"This error typically indicates:\n"
-                    f"  1. Insufficient SOL balance for blockchain fees (~0.44 SOL needed for position creation)\n"
-                    f"  2. Transaction simulation failure (wallet lacks funds)\n"
-                    f"  3. Missing or invalid wallet configuration\n"
-                    f"  4. Invalid pool or network parameters\n\n"
-                    f"🔍 To diagnose the issue:\n"
-                    f"  1. Check Gateway logs: manage_gateway_container(action='get_logs', tail=50)\n"
-                    f"  2. Look for 'insufficient lamports' or 'Insufficient funds' messages\n"
-                    f"  3. Verify wallet has enough SOL for transaction costs\n\n"
-                    f"💰 Common fixes:\n"
-                    f"  - Add at least 0.5 SOL to your wallet for position operations\n"
-                    f"  - Verify wallet is properly configured in Gateway\n"
-                    f"  - Check that the pool address and network are correct"
-                )
+        # Provide more helpful error messages for common Gateway errors
+        if "'NoneType' object has no attribute 'get'" in error_message:
+            raise ToolError(
+                f"Gateway CLMM operation failed with internal error.\n\n"
+                f"⚠️  Gateway Error: {error_message}\n\n"
+                f"This error typically indicates:\n"
+                f"  1. Insufficient SOL balance for blockchain fees (~0.44 SOL needed for position creation)\n"
+                f"  2. Transaction simulation failure (wallet lacks funds)\n"
+                f"  3. Missing or invalid wallet configuration\n"
+                f"  4. Invalid pool or network parameters\n\n"
+                f"🔍 To diagnose the issue:\n"
+                f"  1. Check Gateway logs: manage_gateway_container(action='get_logs', tail=50)\n"
+                f"  2. Look for 'insufficient lamports' or 'Insufficient funds' messages\n"
+                f"  3. Verify wallet has enough SOL for transaction costs\n\n"
+                f"💰 Common fixes:\n"
+                f"  - Add at least 0.5 SOL to your wallet for position operations\n"
+                f"  - Verify wallet is properly configured in Gateway\n"
+                f"  - Check that the pool address and network are correct"
+            )
 
-            # Check for insufficient balance errors
-            if "insufficient" in error_message.lower() or "balance" in error_message.lower():
-                raise ToolError(
-                    f"Gateway CLMM operation failed: Insufficient balance.\n\n"
-                    f"Error: {error_message}\n\n"
-                    f"💰 Your wallet doesn't have enough funds for this operation.\n"
-                    f"   Check Gateway logs for specific balance requirements."
-                )
+        # Check for insufficient balance errors
+        if "insufficient" in error_message.lower() or "balance" in error_message.lower():
+            raise ToolError(
+                f"Gateway CLMM operation failed: Insufficient balance.\n\n"
+                f"Error: {error_message}\n\n"
+                f"💰 Your wallet doesn't have enough funds for this operation.\n"
+                f"   Check Gateway logs for specific balance requirements."
+            )
 
-            raise ToolError(f"Gateway CLMM position management failed: {error_message}")
+        raise ToolError(f"Gateway CLMM position management failed: {error_message}")
