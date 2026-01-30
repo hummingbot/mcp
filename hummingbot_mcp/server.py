@@ -19,16 +19,27 @@ from hummingbot_mcp.formatters import (
     format_portfolio_as_table,
 )
 from hummingbot_mcp.hummingbot_client import hummingbot_client
+from hummingbot_mcp.middleware import handle_errors, with_client
+from hummingbot_mcp.schemas import (
+    GatewayCLMMPoolRequest,
+    GatewayCLMMPositionRequest,
+    GatewayConfigRequest,
+    GatewayContainerRequest,
+    GatewaySwapRequest,
+    ManageExecutorPositionsRequest,
+    ManageExecutorsRequest,
+    SetupConnectorRequest,
+)
 from hummingbot_mcp.settings import settings
 from hummingbot_mcp.tools import bot_management as bot_management_tools
 from hummingbot_mcp.tools import controllers as controllers_tools
 from hummingbot_mcp.tools import market_data as market_data_tools
 from hummingbot_mcp.tools import portfolio as portfolio_tools
 from hummingbot_mcp.tools import trading as trading_tools
-from hummingbot_mcp.tools.account import SetupConnectorRequest
-from hummingbot_mcp.tools.gateway import GatewayContainerRequest, GatewayConfigRequest
-from hummingbot_mcp.tools.gateway_swap import GatewaySwapRequest
-from hummingbot_mcp.tools.gateway_clmm import GatewayCLMMPoolRequest, GatewayCLMMPositionRequest
+from hummingbot_mcp.tools.executors import (
+    manage_executors as manage_executors_impl,
+    manage_executor_positions as manage_executor_positions_impl,
+)
 
 # Configure root logger
 logging.basicConfig(
@@ -66,10 +77,48 @@ async def setup_connector(
         account: Account name to add credentials to. If not provided, prompts for account selection.
         confirm_override: Explicit confirmation to override existing connector. Required when connector already exists.
     """
+    # Delegate to the internal _setup_connector_impl which handles both setup and delete flows
+    return await _setup_connector_impl(
+        action=None, connector=connector, credentials=credentials,
+        account=account, confirm_override=confirm_override,
+    )
+
+
+@mcp.tool()
+async def delete_connector(
+        connector: str | None = None,
+        account: str | None = None,
+) -> str:
+    """Delete an exchange connector's credentials from an account.
+
+    This tool guides you through removing exchange credentials with a progressive flow:
+    1. No parameters → List all accounts and their configured connectors
+    2. Connector only → Show which accounts have this connector configured
+    3. Connector + account → Delete the credential
+
+    Args:
+        connector: Exchange connector name to delete (e.g., 'binance', 'binance_perpetual'). Leave empty to list configured connectors.
+        account: Account name to delete credentials from. If not provided, shows accounts with this connector.
+    """
+    return await _setup_connector_impl(
+        action="delete", connector=connector, credentials=None,
+        account=account, confirm_override=None,
+    )
+
+
+async def _setup_connector_impl(
+        action: str | None = None,
+        connector: str | None = None,
+        credentials: dict[str, Any] | None = None,
+        account: str | None = None,
+        confirm_override: bool | None = None,
+) -> str:
+    """Shared implementation for setup_connector and delete_connector tools."""
     try:
         # Create and validate request using Pydantic model
         request = SetupConnectorRequest(
-            connector=connector, credentials=credentials, account=account, confirm_override=confirm_override
+            action=action, connector=connector, credentials=credentials,
+            account=account, confirm_override=confirm_override,
         )
 
         from .tools.account import setup_connector as setup_connector_impl
@@ -77,9 +126,9 @@ async def setup_connector(
         result = await setup_connector_impl(request)
 
         # Format response based on action type
-        action = result.get("action", "")
+        result_action = result.get("action", "")
 
-        if action == "list_connectors":
+        if result_action == "list_connectors":
             connectors = result.get("connectors", [])
             # Format connectors in columns for better readability
             connector_lines = []
@@ -95,9 +144,8 @@ async def setup_connector(
                 f"Example: {result.get('example', '')}"
             )
 
-        elif action == "show_config_map":
+        elif result_action == "show_config_map":
             fields = result.get("required_fields", [])
-            example_dict = result.get("example", {})
 
             return (
                 f"Required Credentials for {result.get('connector', '')}:\n\n"
@@ -106,7 +154,7 @@ async def setup_connector(
                 f"Example: {result.get('example', '')}"
             )
 
-        elif action == "select_account":
+        elif result_action == "select_account":
             accounts = result.get("accounts", [])
             return (
                 f"{result.get('message', '')}\n\n"
@@ -116,7 +164,7 @@ async def setup_connector(
                 f"Example: {result.get('example', '')}"
             )
 
-        elif action == "requires_confirmation":
+        elif result_action == "requires_confirmation":
             return (
                 f"⚠️  {result.get('message', '')}\n\n"
                 f"Account: {result.get('account', '')}\n"
@@ -126,7 +174,7 @@ async def setup_connector(
                 f"Example: {result.get('example', '')}"
             )
 
-        elif action == "override_rejected":
+        elif result_action == "override_rejected":
             return (
                 f"❌ {result.get('message', '')}\n\n"
                 f"Account: {result.get('account', '')}\n"
@@ -134,7 +182,7 @@ async def setup_connector(
                 f"Next Step: {result.get('next_step', '')}"
             )
 
-        elif action in ["credentials_added", "credentials_overridden"]:
+        elif result_action in ["credentials_added", "credentials_overridden"]:
             return (
                 f"✅ {result.get('message', '')}\n\n"
                 f"Account: {result.get('account', '')}\n"
@@ -144,11 +192,47 @@ async def setup_connector(
                 f"Next Step: {result.get('next_step', '')}"
             )
 
+        # Delete flow responses
+        elif result_action == "delete_list":
+            account_connectors = result.get("account_connectors", {})
+            lines = [result.get("message", "")]
+            for acc, conns in account_connectors.items():
+                conns_str = ", ".join(conns) if conns else "(none)"
+                lines.append(f"  - {acc}: {conns_str}")
+            lines.append("")
+            lines.append(f"Next Step: {result.get('next_step', '')}")
+            lines.append(f"Example: {result.get('example', '')}")
+            return "\n".join(lines)
+
+        elif result_action == "delete_select_account":
+            accounts = result.get("accounts", [])
+            return (
+                f"{result.get('message', '')}\n\n"
+                f"Accounts:\n" + "\n".join(f"  - {acc}" for acc in accounts) + "\n\n"
+                f"Default Account: {result.get('default_account', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}\n"
+                f"Example: {result.get('example', '')}"
+            )
+
+        elif result_action == "delete_not_found":
+            return (
+                f"❌ {result.get('message', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}"
+            )
+
+        elif result_action == "credentials_deleted":
+            return (
+                f"✅ {result.get('message', '')}\n\n"
+                f"Account: {result.get('account', '')}\n"
+                f"Connector: {result.get('connector', '')}\n\n"
+                f"Next Step: {result.get('next_step', '')}"
+            )
+
         # Fallback for unknown actions
-        return f"Setup Connector Result: {result}"
+        return f"Connector Result: {result}"
     except Exception as e:
-        logger.error(f"setup_connector failed: {str(e)}", exc_info=True)
-        raise ToolError(f"Failed to setup connector: {str(e)}")
+        logger.error(f"setup/delete connector failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to setup/delete connector: {str(e)}")
 
 
 @mcp.tool()
@@ -311,6 +395,7 @@ async def get_portfolio_overview(
         include_lp_positions: bool = True,
         include_active_orders: bool = True,
         as_distribution: bool = False,
+        refresh: bool = False,
 ) -> str:
     """Get a unified portfolio overview with balances, perpetual positions, LP positions, and active orders.
 
@@ -337,6 +422,7 @@ async def get_portfolio_overview(
         include_lp_positions: Include LP (CLMM) positions in the overview (default: True)
         include_active_orders: Include active (open) orders in the overview (default: True)
         as_distribution: Show token balances as distribution percentages (default: False)
+        refresh: If True, refresh balances from exchanges before returning. If False, return cached state (default: False)
     """
     try:
         client = await hummingbot_client.get_client()
@@ -358,6 +444,7 @@ async def get_portfolio_overview(
             include_perp_positions=include_perp_positions,
             include_lp_positions=include_lp_positions,
             include_active_orders=include_active_orders,
+            refresh=refresh,
         )
 
         return result["formatted_output"]
@@ -704,6 +791,10 @@ async def explore_controllers(
     """
     Explore and understand controllers and their configs.
 
+    ⚠️ NOTE: For most trading strategies (grid, DCA, position trading), use manage_executors() instead.
+    Only use controllers when the user EXPLICITLY asks for "controllers", "bots", or needs advanced
+    multi-strategy bot deployments with centralized risk management.
+
     Use this tool to discover what's available and understand how things work.
 
     Progressive flow:
@@ -775,6 +866,10 @@ async def modify_controllers(
     Create, update, or delete controllers and their configurations. If bot name is provided, it can only modify the config
     in the bot deployed with that name.
 
+    ⚠️ NOTE: For most trading strategies (grid, DCA, position trading), use manage_executors() instead.
+    Only use controllers when the user EXPLICITLY asks for "controllers", "bots", or needs advanced
+    multi-strategy bot deployments with centralized risk management.
+
     IMPORTANT: When creating a config without specifying config_data details, you MUST first use the explore_controllers tool
     with action="describe" and the controller_name to understand what parameters are required. The config_data must include
     ALL relevant parameters for the controller to function properly.
@@ -834,6 +929,13 @@ async def deploy_bot_with_controllers(
         image: str = "hummingbot/hummingbot:latest",
 ) -> str:
     """Deploy a bot with specified controller configurations.
+
+    ⚠️ NOTE: For most trading strategies (grid, DCA, position trading), use manage_executors() instead.
+    Only use this when the user EXPLICITLY asks for a "bot" deployment or needs advanced features like:
+    - Running multiple strategies in a single bot
+    - Centralized risk management (global/per-controller drawdown limits)
+    - Persistent bot deployment via Docker
+
     Args:
         bot_name: Name of the bot to deploy
         controllers_config: List of controller configs to use for the bot deployment.
@@ -863,7 +965,12 @@ async def deploy_bot_with_controllers(
 @mcp.tool()
 async def get_active_bots_status():
     """
-    Get the status of all active bots. Including the unrealized PnL, realized PnL, volume traded, latest logs, etc.
+    Get the status of all active controller-based bots deployed via deploy_bot_with_controllers.
+    Shows unrealized PnL, realized PnL, volume traded, latest logs, etc.
+
+    Note: This is for controller-based bots only. For executor status, use manage_executors(action="search") or
+    manage_executors(action="get_summary") instead.
+
     Note: Both error logs and general logs are limited to the last 5 entries. Use get_bot_logs for more detailed log searching.
     """
     try:
@@ -891,7 +998,9 @@ async def get_bot_logs(
         search_term: str | None = None,
 ) -> str:
     """
-    Get detailed logs for a specific bot with filtering options.
+    Get detailed logs for a specific controller-based bot with filtering options.
+
+    Note: This is for controller-based bots only. For executor information, use manage_executors() instead.
 
     Args:
         bot_name: Name of the bot to get logs for
@@ -939,7 +1048,9 @@ async def manage_bot_execution(
         controller_names: list[str] | None = None,
 ):
     """
-    Manage bot and controller execution states.
+    Manage controller-based bot execution states (bots deployed via deploy_bot_with_controllers).
+
+    Note: For executors, use manage_executors(action="stop", executor_id="...") instead.
 
     Actions:
     - "stop_bot": Stop and archive the entire bot forever (controller_names not needed)
@@ -968,6 +1079,150 @@ async def manage_bot_execution(
     except Exception as e:
         logger.error(f"manage_bot_execution failed: {str(e)}", exc_info=True)
         raise ToolError(f"Failed to manage bot execution: {str(e)}")
+
+
+# Executor Management Tools
+
+
+@mcp.tool()
+async def manage_executors(
+        action: Literal["create", "search", "get", "stop", "get_summary", "get_preferences", "set_preferences", "reset_preferences"] | None = None,
+        executor_type: str | None = None,
+        executor_config: dict[str, Any] | None = None,
+        executor_id: str | None = None,
+        account_names: list[str] | None = None,
+        connector_names: list[str] | None = None,
+        trading_pairs: list[str] | None = None,
+        executor_types: list[str] | None = None,
+        status: str | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+        keep_position: bool = False,
+        save_as_default: bool = False,
+        account_name: str | None = None,
+) -> str:
+    """Manage trading executors with progressive disclosure for lifecycle management.
+
+    ⭐ PRIORITY: This is the DEFAULT tool for trading strategies like grid trading, DCA, position trading,
+    and arbitrage. Use executors FIRST unless the user explicitly asks for "controllers" or "bots".
+
+    Available Executor Types:
+    - grid_executor: Grid trading strategy (buy/sell at multiple price levels)
+    - position_executor: Directional trading with entry, stop-loss, and take-profit
+    - dca_executor: Dollar-cost averaging for gradual position building
+    - arbitrage_executor: Capture price differences between exchanges
+    - xemm_executor: Cross-exchange market making
+
+    Executors are automated trading components that execute specific strategies.
+    This tool guides you through understanding, creating, monitoring, and stopping executors.
+
+    Progressive Flow:
+    1. No params → List available executor types with descriptions (when to use/avoid)
+    2. executor_type only → Show config schema with your saved defaults applied
+    3. action="create" + executor_config → Create executor (merged with your defaults)
+    4. action="search" → Search/list executors with filters
+    5. action="get" + executor_id → Get specific executor details
+    6. action="stop" + executor_id → Stop executor (with keep_position option)
+    7. action="get_summary" → Get overall executor summary
+
+    Preference Management (stored in ~/.hummingbot_mcp/executor_preferences.md):
+    8. action="get_preferences" → View all saved preferences (or specific executor_type)
+    9. action="set_preferences" + executor_type + executor_config → Update default preferences
+    10. action="reset_preferences" → Reset all preferences to defaults
+
+    Args:
+        action: Action to perform. Leave empty to see executor types or config schema.
+        executor_type: Type of executor (e.g., 'position_executor', 'dca_executor'). Leave empty to list types.
+        executor_config: Configuration for creating an executor. Required for 'create' action. Also used for 'set_preferences'.
+        executor_id: Executor ID for 'get' or 'stop' actions.
+        account_names: Filter by account names (for search).
+        connector_names: Filter by connector names (for search).
+        trading_pairs: Filter by trading pairs (for search).
+        executor_types: Filter by executor types (for search).
+        status: Filter by status - 'RUNNING', 'COMPLETED', 'FAILED' (for search).
+        cursor: Pagination cursor for search results.
+        limit: Maximum results to return (default: 50, max: 1000).
+        keep_position: When stopping, keep the position open instead of closing it (default: False).
+        save_as_default: Save executor_config as default for this executor_type (default: False).
+        account_name: Account name for creating executors (default: 'master_account').
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = ManageExecutorsRequest(
+            action=action,
+            executor_type=executor_type,
+            executor_config=executor_config,
+            executor_id=executor_id,
+            account_names=account_names,
+            connector_names=connector_names,
+            trading_pairs=trading_pairs,
+            executor_types=executor_types,
+            status=status,
+            cursor=cursor,
+            limit=limit,
+            keep_position=keep_position,
+            save_as_default=save_as_default,
+            account_name=account_name,
+        )
+
+        client = await hummingbot_client.get_client()
+        result = await manage_executors_impl(client, request)
+
+        return result.get("formatted_output", str(result))
+
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"manage_executors failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage executors: {str(e)}")
+
+
+@mcp.tool()
+async def manage_executor_positions(
+        action: Literal["clear"] | None = None,
+        connector_name: str | None = None,
+        trading_pair: str | None = None,
+        account_name: str | None = None,
+) -> str:
+    """Manage positions held by executors with progressive disclosure.
+
+    Executor positions are holdings managed by active executors. Use this tool to view
+    position summaries, get specific position details, or clear positions that were
+    closed manually outside the executor system.
+
+    Progressive Flow:
+    1. No params → Get positions summary (aggregated view)
+    2. connector_name + trading_pair → Get specific position details
+    3. action="clear" + connector_name + trading_pair → Clear position record
+
+    Args:
+        action: Action to perform. Leave empty to view positions. Use 'clear' to remove a position record.
+        connector_name: Connector name for filtering or clearing positions.
+        trading_pair: Trading pair for filtering or clearing positions.
+        account_name: Account name (default: 'master_account').
+    """
+    try:
+        # Create and validate request using Pydantic model
+        request = ManageExecutorPositionsRequest(
+            action=action,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            account_name=account_name,
+        )
+
+        client = await hummingbot_client.get_client()
+        result = await manage_executor_positions_impl(client, request)
+
+        return result.get("formatted_output", str(result))
+
+    except HBConnectionError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        logger.error(f"manage_executor_positions failed: {str(e)}", exc_info=True)
+        raise ToolError(f"Failed to manage executor positions: {str(e)}")
+
+
+# Gateway Tools
 
 
 @mcp.tool()
