@@ -21,12 +21,6 @@ class MaxConnectionsAttemptError(HummingbotMCPError):
     pass
 
 
-class ValidationError(HummingbotMCPError):
-    """Exception raised when input validation fails"""
-
-    pass
-
-
 class ConfigurationError(HummingbotMCPError):
     """Exception raised when configuration is invalid"""
 
