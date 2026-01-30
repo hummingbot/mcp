@@ -26,7 +26,7 @@ if [ -z "$EXECUTOR_TYPE" ]; then
 fi
 
 # Fetch schema
-RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/executors/types/$EXECUTOR_TYPE/config")
+RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/executors/types/$EXECUTOR_TYPE/config")
 
 # Check for error
 if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then

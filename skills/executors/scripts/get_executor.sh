@@ -26,7 +26,7 @@ if [ -z "$EXECUTOR_ID" ]; then
 fi
 
 # Fetch executor details
-RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/executors/$EXECUTOR_ID")
+RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/executors/$EXECUTOR_ID")
 
 # Check for error
 if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then

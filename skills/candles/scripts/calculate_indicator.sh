@@ -115,20 +115,35 @@ case "$INTERVAL" in
         ;;
 esac
 
-# Fetch candles
-CANDLES=$(curl -s -u "$API_USER:$API_PASS" \
-    "$API_URL/api/v1/market-data/candles?connector_name=$CONNECTOR&trading_pair=$TRADING_PAIR&interval=$INTERVAL&max_records=$MAX_RECORDS")
+# Calculate timestamps for historical fetch
+END_TIME=$(date +%s)
+START_TIME=$((END_TIME - DAYS * 24 * 3600))
+
+# Fetch historical candles
+HISTORICAL=$(curl -s -u "$API_USER:$API_PASS" \
+    -X POST "$API_URL/market-data/historical-candles" \
+    -H "Content-Type: application/json" \
+    -d "{\"connector_name\": \"$CONNECTOR\", \"trading_pair\": \"$TRADING_PAIR\", \"interval\": \"$INTERVAL\", \"start_time\": $START_TIME, \"end_time\": $END_TIME}" 2>/dev/null || echo "[]")
+
+# Fetch real-time candles
+REALTIME=$(curl -s -u "$API_USER:$API_PASS" \
+    -X POST "$API_URL/market-data/candles" \
+    -H "Content-Type: application/json" \
+    -d "{\"connector_name\": \"$CONNECTOR\", \"trading_pair\": \"$TRADING_PAIR\", \"interval\": \"$INTERVAL\", \"max_records\": 100}" 2>/dev/null || echo "[]")
+
+# Merge and deduplicate by timestamp
+CANDLES=$(echo "$HISTORICAL $REALTIME" | jq -s '.[0] + .[1] | group_by(.timestamp) | map(.[0]) | sort_by(.timestamp)')
 
 if echo "$CANDLES" | jq -e '.detail' > /dev/null 2>&1; then
     echo "{\"error\": \"Failed to fetch candles\", \"detail\": $CANDLES}"
     exit 1
 fi
 
-# Extract close prices
-CLOSES=$(echo "$CANDLES" | jq '[.[].close]')
-HIGHS=$(echo "$CANDLES" | jq '[.[].high]')
-LOWS=$(echo "$CANDLES" | jq '[.[].low]')
-VOLUMES=$(echo "$CANDLES" | jq '[.[].volume]')
+# Extract close prices (compact JSON to avoid newline issues in heredoc)
+CLOSES=$(echo "$CANDLES" | jq -c '[.[].close]')
+HIGHS=$(echo "$CANDLES" | jq -c '[.[].high]')
+LOWS=$(echo "$CANDLES" | jq -c '[.[].low]')
+VOLUMES=$(echo "$CANDLES" | jq -c '[.[].volume]')
 TOTAL=$(echo "$CANDLES" | jq 'length')
 
 # Calculate indicator using Python (for accurate calculations)

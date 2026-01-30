@@ -226,12 +226,30 @@ Example output:
 
 ## API Endpoints Used
 
+All requests go to `http://localhost:8000` with Basic Auth (`admin:admin`):
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/market-data/candle-connectors` | GET | List connectors with candle support |
-| `/api/v1/market-data/candles` | GET | Fetch OHLCV data |
-| `/api/v1/market-data/prices` | GET | Get current prices |
-| `/api/v1/market-data/funding-info` | GET | Get funding rates |
+| `/market-data/available-candle-connectors` | GET | List connectors with candle support |
+| `/market-data/historical-candles` | POST | Fetch bulk historical OHLCV data |
+| `/market-data/candles` | POST | Fetch real-time OHLCV data |
+| `/market-data/prices` | POST | Get current prices |
+| `/market-data/funding-info` | POST | Get funding rates |
+
+## Data Fetching Strategy
+
+Scripts use a dual-fetch approach for comprehensive data:
+1. **Historical candles** - Bulk data from `/market-data/historical-candles`
+2. **Real-time candles** - Latest data from `/market-data/candles`
+3. **Merge** - Deduplicate by timestamp, real-time overrides historical
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_URL` | `http://localhost:8000` | API base URL |
+| `API_USER` | `admin` | API username |
+| `API_PASS` | `admin` | API password |
 
 ## Error Handling
 

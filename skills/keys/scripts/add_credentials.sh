@@ -64,7 +64,7 @@ fi
 CONNECTOR=$(echo "$CONNECTOR" | tr '[:upper:]' '[:lower:]' | tr '-' '_' | tr ' ' '_')
 
 # Check if credentials already exist
-EXISTING=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$ACCOUNT/credentials")
+EXISTING=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$ACCOUNT/credentials")
 if echo "$EXISTING" | jq -e "index(\"$CONNECTOR\")" > /dev/null 2>&1; then
     if [ "$FORCE" = false ]; then
         cat << EOF
@@ -83,7 +83,7 @@ RESPONSE=$(curl -s -X POST \
     -u "$API_USER:$API_PASS" \
     -H "Content-Type: application/json" \
     -d "{\"connector_name\": \"$CONNECTOR\", \"credentials\": $CREDENTIALS}" \
-    "$API_URL/api/v1/accounts/$ACCOUNT/credentials")
+    "$API_URL/accounts/$ACCOUNT/credentials")
 
 # Check for error
 if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then
@@ -92,7 +92,7 @@ if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then
 fi
 
 # Verify credentials were added
-UPDATED=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$ACCOUNT/credentials")
+UPDATED=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$ACCOUNT/credentials")
 
 cat << EOF
 {

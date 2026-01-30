@@ -36,13 +36,13 @@ done
 
 # If no account specified, list all accounts and their credentials
 if [ -z "$ACCOUNT" ]; then
-    ACCOUNTS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts")
+    ACCOUNTS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/")
 
     RESULT="{"
     FIRST=true
 
     for account in $(echo "$ACCOUNTS" | jq -r '.[]'); do
-        CREDS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$account/credentials")
+        CREDS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$account/credentials")
 
         if [ "$FIRST" = true ]; then
             FIRST=false
@@ -64,7 +64,7 @@ if [ -z "$ACCOUNT" ]; then
 EOF
 else
     # Get credentials for specific account
-    CREDS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$ACCOUNT/credentials")
+    CREDS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$ACCOUNT/credentials")
 
     # Check for error
     if echo "$CREDS" | jq -e '.detail' > /dev/null 2>&1; then

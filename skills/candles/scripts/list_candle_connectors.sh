@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Get list of connectors that support candles
-CONNECTORS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/market-data/candle-connectors")
+CONNECTORS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/market-data/available-candle-connectors")
 
 # Check for error
 if echo "$CONNECTORS" | jq -e '.detail' > /dev/null 2>&1; then

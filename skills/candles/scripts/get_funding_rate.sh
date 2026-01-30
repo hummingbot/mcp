@@ -56,9 +56,11 @@ if [[ "$CONNECTOR" != *"perpetual"* ]]; then
     exit 1
 fi
 
-# Fetch funding rate
+# Fetch funding rate (POST request with JSON body)
 FUNDING=$(curl -s -u "$API_USER:$API_PASS" \
-    "$API_URL/api/v1/market-data/funding-info?connector_name=$CONNECTOR&trading_pair=$TRADING_PAIR")
+    -X POST "$API_URL/market-data/funding-info" \
+    -H "Content-Type: application/json" \
+    -d "{\"connector_name\": \"$CONNECTOR\", \"trading_pair\": \"$TRADING_PAIR\"}")
 
 # Check for error
 if echo "$FUNDING" | jq -e '.detail' > /dev/null 2>&1; then

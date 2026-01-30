@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Fetch summary
-RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/executors/summary")
+RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/executors/summary")
 
 # Check for error
 if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then

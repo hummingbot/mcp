@@ -88,9 +88,24 @@ case "$INTERVAL" in
         ;;
 esac
 
-# Fetch candles
-CANDLES=$(curl -s -u "$API_USER:$API_PASS" \
-    "$API_URL/api/v1/market-data/candles?connector_name=$CONNECTOR&trading_pair=$TRADING_PAIR&interval=$INTERVAL&max_records=$MAX_RECORDS")
+# Calculate timestamps for historical fetch
+END_TIME=$(date +%s)
+START_TIME=$((END_TIME - DAYS * 24 * 3600))
+
+# Step 1: Fetch historical candles
+HISTORICAL=$(curl -s -u "$API_USER:$API_PASS" \
+    -X POST "$API_URL/market-data/historical-candles" \
+    -H "Content-Type: application/json" \
+    -d "{\"connector_name\": \"$CONNECTOR\", \"trading_pair\": \"$TRADING_PAIR\", \"interval\": \"$INTERVAL\", \"start_time\": $START_TIME, \"end_time\": $END_TIME}" 2>/dev/null || echo "[]")
+
+# Step 2: Fetch real-time candles
+REALTIME=$(curl -s -u "$API_USER:$API_PASS" \
+    -X POST "$API_URL/market-data/candles" \
+    -H "Content-Type: application/json" \
+    -d "{\"connector_name\": \"$CONNECTOR\", \"trading_pair\": \"$TRADING_PAIR\", \"interval\": \"$INTERVAL\", \"max_records\": 100}" 2>/dev/null || echo "[]")
+
+# Step 3: Merge and deduplicate by timestamp (real-time overrides historical)
+CANDLES=$(echo "$HISTORICAL $REALTIME" | jq -s '.[0] + .[1] | group_by(.timestamp) | map(.[0]) | sort_by(.timestamp)')
 
 # Check for error
 if echo "$CANDLES" | jq -e '.detail' > /dev/null 2>&1; then

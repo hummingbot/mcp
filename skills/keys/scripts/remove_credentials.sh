@@ -49,7 +49,7 @@ fi
 CONNECTOR=$(echo "$CONNECTOR" | tr '[:upper:]' '[:lower:]' | tr '-' '_' | tr ' ' '_')
 
 # Check if credentials exist
-EXISTING=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$ACCOUNT/credentials")
+EXISTING=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$ACCOUNT/credentials")
 if ! echo "$EXISTING" | jq -e "index(\"$CONNECTOR\")" > /dev/null 2>&1; then
     cat << EOF
 {
@@ -63,10 +63,10 @@ fi
 # Remove credentials via API
 RESPONSE=$(curl -s -X DELETE \
     -u "$API_USER:$API_PASS" \
-    "$API_URL/api/v1/accounts/$ACCOUNT/credentials/$CONNECTOR")
+    "$API_URL/accounts/$ACCOUNT/credentials/$CONNECTOR")
 
 # Verify credentials were removed
-UPDATED=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$ACCOUNT/credentials")
+UPDATED=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$ACCOUNT/credentials")
 
 cat << EOF
 {

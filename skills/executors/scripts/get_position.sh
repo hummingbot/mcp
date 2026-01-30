@@ -33,7 +33,7 @@ if [ -z "$PAIR" ]; then
 fi
 
 # Fetch position
-RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/executors/positions/$CONNECTOR/$PAIR")
+RESPONSE=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/executors/positions/$CONNECTOR/$PAIR")
 
 # Check for error
 if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then

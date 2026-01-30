@@ -30,17 +30,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Get list of available connectors
-CONNECTORS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/connectors")
+CONNECTORS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/connectors/")
 
 # Get list of accounts
-ACCOUNTS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts")
+ACCOUNTS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/")
 
 # Get credentials for each account
 ACCOUNT_CREDENTIALS="{"
 FIRST_ACCOUNT=true
 
 for account in $(echo "$ACCOUNTS" | jq -r '.[]'); do
-    CREDS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/api/v1/accounts/$account/credentials")
+    CREDS=$(curl -s -u "$API_USER:$API_PASS" "$API_URL/accounts/$account/credentials")
 
     if [ "$FIRST_ACCOUNT" = true ]; then
         FIRST_ACCOUNT=false

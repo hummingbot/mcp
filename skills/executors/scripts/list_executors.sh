@@ -41,7 +41,7 @@ RESPONSE=$(curl -s -X POST \
     -u "$API_USER:$API_PASS" \
     -H "Content-Type: application/json" \
     -d "$FILTER" \
-    "$API_URL/api/v1/executors/search")
+    "$API_URL/executors/search")
 
 # Check for error
 if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then

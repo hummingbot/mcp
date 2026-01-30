@@ -50,24 +50,28 @@ if [ -z "$PAIRS" ]; then
     exit 1
 fi
 
-# Convert pairs to array format for API
-PAIRS_ARRAY=$(echo "$PAIRS" | tr ',' '\n' | jq -R . | jq -s 'join(",")')
-PAIRS_PARAM=$(echo "$PAIRS_ARRAY" | tr -d '"')
+# Convert pairs to JSON array format
+PAIRS_JSON=$(echo "$PAIRS" | tr ',' '\n' | jq -R . | jq -s .)
 
-# Fetch prices
-PRICES=$(curl -s -u "$API_USER:$API_PASS" \
-    "$API_URL/api/v1/market-data/prices?connector_name=$CONNECTOR&trading_pairs=$PAIRS_PARAM")
+# Fetch prices (POST request with JSON body)
+RESPONSE=$(curl -s -u "$API_USER:$API_PASS" \
+    -X POST "$API_URL/market-data/prices" \
+    -H "Content-Type: application/json" \
+    -d "{\"connector_name\": \"$CONNECTOR\", \"trading_pairs\": $PAIRS_JSON}")
 
 # Check for error
-if echo "$PRICES" | jq -e '.detail' > /dev/null 2>&1; then
-    echo "{\"error\": \"Failed to fetch prices\", \"detail\": $PRICES}"
+if echo "$RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then
+    echo "{\"error\": \"Failed to fetch prices\", \"detail\": $RESPONSE}"
     exit 1
 fi
 
+# Extract prices and timestamp from response
+PRICES=$(echo "$RESPONSE" | jq '.prices')
+TIMESTAMP=$(echo "$RESPONSE" | jq -r '.timestamp // 0')
+
 # Format timestamp
-TIMESTAMP=$(echo "$PRICES" | jq '.timestamp // 0')
 if [ "$TIMESTAMP" != "0" ] && [ "$TIMESTAMP" != "null" ]; then
-    TIME_STR=$(date -d "@$TIMESTAMP" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date -r "$TIMESTAMP" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "N/A")
+    TIME_STR=$(date -d "@${TIMESTAMP%.*}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date -r "${TIMESTAMP%.*}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "N/A")
 else
     TIME_STR="N/A"
 fi
