@@ -262,14 +262,21 @@ class ExecutorPreferencesManager:
     def update_defaults(self, executor_type: str, config: dict[str, Any]) -> None:
         """Update default configuration for an executor type.
 
+        Merges new config with existing defaults so that only the provided
+        keys are updated while previously saved keys are preserved.
+
         Args:
             executor_type: The executor type to update
-            config: The new default configuration
+            config: The configuration keys to update (merged with existing defaults)
         """
         content = self._read_content()
 
+        # Merge with existing defaults so we don't lose previously saved keys
+        existing_defaults = self.get_defaults(executor_type)
+        merged_config = {**existing_defaults, **config}
+
         # Create the new YAML block
-        new_yaml = yaml.dump({executor_type: config}, default_flow_style=False, sort_keys=False)
+        new_yaml = yaml.dump({executor_type: merged_config}, default_flow_style=False, sort_keys=False)
         new_block = f"```yaml\n{new_yaml}```"
 
         # Pattern to find the existing block for this executor type
@@ -334,6 +341,26 @@ class ExecutorPreferencesManager:
         defaults = self.get_defaults(executor_type)
         merged = {**defaults, **user_config}
         return merged
+
+    def get_raw_content(self) -> str:
+        """Get the raw markdown content of the preferences file.
+
+        Returns:
+            The full text content of the preferences file
+        """
+        return self._read_content()
+
+    def save_content(self, content: str) -> None:
+        """Save raw content to the preferences file.
+
+        This replaces the entire file content, allowing the AI to make
+        intelligent edits (add notes, organize by exchange, etc.).
+
+        Args:
+            content: The complete markdown content to write
+        """
+        self._write_content(content)
+        logger.info("Saved preferences file content")
 
     def get_preferences_path(self) -> str:
         """Get the path to the preferences file.
