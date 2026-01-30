@@ -10,6 +10,7 @@ from .base import (
     format_percentage,
     format_table_separator,
     format_time_only,
+    get_field,
     truncate_string,
 )
 
@@ -36,17 +37,15 @@ def format_bot_logs_as_table(logs: list[dict[str, Any]]) -> str:
     # Format each log as a row
     rows = []
     for log_entry in logs:
-        time_str = format_time_only(log_entry.get("timestamp", 0))
-        level = log_entry.get("level_name", "INFO")[:4]  # Truncate to 4 chars (INFO, WARN, ERR)
-        category = log_entry.get("log_category", "gen")[:3]  # gen or err
-        message = truncate_string(log_entry.get("msg", ""))
+        time_str = format_time_only(get_field(log_entry, "timestamp", default=0))
+        level = str(get_field(log_entry, "level_name", default="INFO"))[:4]
+        category = str(get_field(log_entry, "log_category", default="gen"))[:3]
+        message = truncate_string(str(get_field(log_entry, "msg", default="")))
 
         row = f"{time_str} | {level:4} | {category:3} | {message}"
         rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
 def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
@@ -74,7 +73,7 @@ def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
         if not isinstance(bot_data, dict):
             continue
 
-        bot_status = bot_data.get("status", "unknown")
+        bot_status = get_field(bot_data, "status", default="unknown")
         error_count = len(bot_data.get("error_logs", []))
         log_count = len(bot_data.get("general_logs", []))
 
@@ -95,14 +94,14 @@ def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
         else:
             # Bot with controllers
             for controller_name, controller_data in performance.items():
-                ctrl_status = controller_data.get("status", "unknown")
+                ctrl_status = get_field(controller_data, "status", default="unknown")
                 ctrl_perf = controller_data.get("performance", {})
 
-                realized_pnl = format_number(ctrl_perf.get("realized_pnl_quote"), compact=False)
-                unrealized_pnl = format_number(ctrl_perf.get("unrealized_pnl_quote"), compact=False)
-                global_pnl = format_number(ctrl_perf.get("global_pnl_quote"), compact=False)
-                global_pnl_pct = format_percentage(ctrl_perf.get("global_pnl_pct"))
-                volume = format_number(ctrl_perf.get("volume_traded"), compact=False)
+                realized_pnl = format_number(get_field(ctrl_perf, "realized_pnl_quote", default=None), compact=False)
+                unrealized_pnl = format_number(get_field(ctrl_perf, "unrealized_pnl_quote", default=None), compact=False)
+                global_pnl = format_number(get_field(ctrl_perf, "global_pnl_quote", default=None), compact=False)
+                global_pnl_pct = format_percentage(get_field(ctrl_perf, "global_pnl_pct", default=None))
+                volume = format_number(get_field(ctrl_perf, "volume_traded", default=None), compact=False)
 
                 row = (
                     f"{bot_name[:20]} | "
@@ -117,6 +116,4 @@ def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
                 )
                 rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{separator}\n" + "\n".join(rows)
