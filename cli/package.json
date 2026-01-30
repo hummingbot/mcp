@@ -1,0 +1,56 @@
+{
+  "name": "@hummingbot/skills",
+  "version": "1.0.0",
+  "description": "CLI tool to discover and install Hummingbot trading skills for AI agents",
+  "type": "module",
+  "bin": {
+    "hummingbot-skills": "./bin/cli.mjs",
+    "hb-skills": "./bin/cli.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "scripts": {
+    "dev": "node bin/cli.mjs",
+    "test": "node --test src/**/*.test.mjs",
+    "format": "prettier --write 'src/**/*.mjs' 'bin/**/*.mjs'"
+  },
+  "keywords": [
+    "hummingbot",
+    "trading",
+    "skills",
+    "agent-skills",
+    "ai",
+    "claude",
+    "cursor",
+    "trading-bot",
+    "crypto",
+    "defi"
+  ],
+  "author": "Hummingbot Foundation",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hummingbot/mcp.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/hummingbot/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/hummingbot/mcp/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills.json"
+  ],
+  "dependencies": {
+    "xdg-basedir": "^5.1.0"
+  }
+}
