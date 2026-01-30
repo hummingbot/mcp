@@ -152,11 +152,11 @@ class ManageExecutorsRequest(BaseModel):
     6. action="stop" + executor_id -> Stop executor
     7. action="get_summary" -> Get overall executor summary
     8. action="get_preferences" -> View saved preferences (optionally for specific executor_type)
-    9. action="set_preferences" + executor_type + executor_config -> Update preferences
+    9. action="save_preferences" + preferences_content -> Save full preferences file content
     10. action="reset_preferences" -> Reset preferences to defaults
     """
 
-    action: Literal["create", "search", "get", "stop", "get_summary", "get_preferences", "set_preferences", "reset_preferences"] | None = Field(
+    action: Literal["create", "search", "get", "stop", "get_summary", "get_preferences", "save_preferences", "reset_preferences", "positions_summary", "get_position", "clear_position"] | None = Field(
         default=None,
         description="Action to perform. Leave empty to see executor types or show schema.",
     )
@@ -199,7 +199,7 @@ class ManageExecutorsRequest(BaseModel):
 
     status: str | None = Field(
         default=None,
-        description="Filter by status (e.g., 'RUNNING', 'COMPLETED', 'FAILED').",
+        description="Filter by status (e.g., 'RUNNING', 'TERMINATED').",
     )
 
     # Pagination
@@ -227,9 +227,25 @@ class ManageExecutorsRequest(BaseModel):
         description="Save the executor_config as default for this executor_type.",
     )
 
+    preferences_content: str | None = Field(
+        default=None,
+        description="Complete markdown content for the preferences file. Used with 'save_preferences' action.",
+    )
+
     account_name: str | None = Field(
         default=None,
         description="Account name for creating executors. Defaults to 'master_account'.",
+    )
+
+    # Position management fields (for positions_summary, get_position, clear_position)
+    connector_name: str | None = Field(
+        default=None,
+        description="Connector name for position filtering or clearing.",
+    )
+
+    trading_pair: str | None = Field(
+        default=None,
+        description="Trading pair for position filtering or clearing.",
     )
 
     @field_validator("executor_type")
@@ -246,8 +262,8 @@ class ManageExecutorsRequest(BaseModel):
             return "get_summary"
         elif self.action == "get_preferences":
             return "get_preferences"
-        elif self.action == "set_preferences" and self.executor_type and self.executor_config:
-            return "set_preferences"
+        elif self.action == "save_preferences" and self.preferences_content:
+            return "save_preferences"
         elif self.action == "reset_preferences":
             return "reset_preferences"
         elif self.action == "search":
@@ -258,49 +274,16 @@ class ManageExecutorsRequest(BaseModel):
             return "stop"
         elif self.action == "create" and self.executor_config:
             return "create"
+        elif self.action == "positions_summary":
+            return "positions_summary"
+        elif self.action == "get_position" and self.connector_name and self.trading_pair:
+            return "get_position"
+        elif self.action == "clear_position" and self.connector_name and self.trading_pair:
+            return "clear_position"
         elif self.executor_type is not None:
             return "show_schema"
         else:
             return "list_types"
-
-
-class ManageExecutorPositionsRequest(BaseModel):
-    """Request model for managing executor positions with progressive disclosure.
-
-    Progressive Flow Stages:
-    1. No params -> Get positions summary (aggregated view)
-    2. connector_name + trading_pair -> Get specific position details
-    3. action="clear" -> Clear position that was closed manually
-    """
-
-    action: Literal["clear"] | None = Field(
-        default=None,
-        description="Action to perform. Leave empty to view positions.",
-    )
-
-    connector_name: str | None = Field(
-        default=None,
-        description="Connector name for filtering or clearing positions.",
-    )
-
-    trading_pair: str | None = Field(
-        default=None,
-        description="Trading pair for filtering or clearing positions.",
-    )
-
-    account_name: str | None = Field(
-        default=None,
-        description="Account name. Defaults to 'master_account'.",
-    )
-
-    def get_flow_stage(self) -> str:
-        """Determine which stage of the flow we're in."""
-        if self.action == "clear" and self.connector_name and self.trading_pair:
-            return "clear"
-        elif self.connector_name and self.trading_pair:
-            return "get_position"
-        else:
-            return "get_summary"
 
 
 # ==============================================================================
@@ -616,40 +599,49 @@ class GatewaySwapRequest(BaseModel):
 # ==============================================================================
 
 
-class GatewayCLMMPoolRequest(BaseModel):
-    """Request model for Gateway CLMM pool exploration operations.
+class GatewayCLMMRequest(BaseModel):
+    """Request model for unified Gateway CLMM pool and position management operations.
 
-    This model supports pool exploration operations:
+    This model supports all CLMM operations:
+
+    Pool Exploration:
     - list_pools: Get list of available CLMM pools with filtering/sorting
     - get_pool_info: Get detailed information about a specific pool
 
-    Progressive Flow:
-    1. action="list_pools" -> Browse available pools with optional filters
-    2. action="get_pool_info" + pool_address -> Get detailed pool information
+    Position Management:
+    - open_position: Create a new CLMM position with initial liquidity
+    - close_position: Close a position completely (removes all liquidity)
+    - collect_fees: Collect accumulated fees from a position
+    - get_positions: Get all positions owned by a wallet for a specific pool
     """
 
-    action: Literal["list_pools", "get_pool_info"] = Field(
-        description="Action to perform: 'list_pools' (browse pools), 'get_pool_info' (get pool details)"
+    action: Literal["list_pools", "get_pool_info", "open_position", "close_position", "collect_fees", "get_positions"] = Field(
+        description="Action to perform on CLMM pools or positions"
     )
 
     # Common parameters
-    connector: str = Field(
-        description="CLMM connector name (required). Examples: 'meteora', 'raydium', 'uniswap'"
+    connector: str | None = Field(
+        default=None,
+        description="CLMM connector name (required for most actions). Examples: 'meteora', 'raydium', 'uniswap'"
     )
 
     network: str | None = Field(
         default=None,
-        description="Network ID in 'chain-network' format (required for get_pool_info). "
-                    "Examples: 'solana-mainnet-beta', 'ethereum-mainnet'"
+        description="Network ID in 'chain-network' format. Examples: 'solana-mainnet-beta', 'ethereum-mainnet'"
     )
 
-    # Get pool info parameter
     pool_address: str | None = Field(
         default=None,
-        description="Pool contract address (required for get_pool_info action)"
+        description="Pool contract address (required for get_pool_info, open_position, get_positions)"
     )
 
-    # List pools parameters
+    # Position parameters
+    position_address: str | None = Field(
+        default=None,
+        description="Position NFT address (required for close_position and collect_fees)"
+    )
+
+    # Pool listing parameters
     page: int = Field(
         default=0,
         ge=0,
@@ -685,62 +677,15 @@ class GatewayCLMMPoolRequest(BaseModel):
 
     detailed: bool = Field(
         default=False,
-        description="Return full raw pool data without formatting (default: False). "
-                    "When True, returns complete pool information as dict. "
-                    "When False, returns simplified table format."
+        description="Return detailed table with more columns (default: False)"
     )
 
-
-class GatewayCLMMPositionRequest(BaseModel):
-    """Request model for Gateway CLMM position management operations.
-
-    This model supports position management operations:
-    - open_position: Create a new CLMM position with initial liquidity
-    - close_position: Close a position completely (removes all liquidity)
-    - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions owned by a wallet for a specific pool (fetches real-time data from blockchain)
-
-    Progressive Flow:
-    1. action="get_positions" + pool_address -> Get positions for a specific pool (with real-time fees)
-    2. action="open_position" + parameters -> Create new position
-    3. action="collect_fees" + position_address -> Collect fees
-    4. action="close_position" + position_address -> Close position
-    """
-
-    action: Literal["open_position", "close_position", "collect_fees", "get_positions"] = Field(
-        description="Action to perform on CLMM positions"
-    )
-
-    # Common parameters
-    connector: str | None = Field(
-        default=None,
-        description="CLMM connector name (required for most actions). Examples: 'meteora', 'raydium'"
-    )
-
-    network: str | None = Field(
-        default=None,
-        description="Network ID in 'chain-network' format (required for most actions). "
-                    "Examples: 'solana-mainnet-beta', 'ethereum-mainnet'"
-    )
-
+    # Position management parameters
     wallet_address: str | None = Field(
         default=None,
         description="Wallet address (optional, uses default wallet if not provided)"
     )
 
-    # Pool parameters (for open_position, get_positions)
-    pool_address: str | None = Field(
-        default=None,
-        description="Pool contract address (required for open_position and get_positions)"
-    )
-
-    # Position parameters (for close_position, collect_fees)
-    position_address: str | None = Field(
-        default=None,
-        description="Position NFT address (required for close_position and collect_fees)"
-    )
-
-    # Open position parameters
     lower_price: str | None = Field(
         default=None,
         description="Lower price bound for new position (required for open_position). Example: '150'"
