@@ -5,111 +5,15 @@ import asyncio
 import logging
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
-
 from hummingbot_mcp.exceptions import ToolError
 from hummingbot_mcp.hummingbot_client import hummingbot_client
+from hummingbot_mcp.schemas import SetupConnectorRequest
 from hummingbot_mcp.settings import settings
 
 logger = logging.getLogger("hummingbot-mcp")
 
-
-class SetupConnectorRequest(BaseModel):
-    """Request model for setting up exchange connectors with progressive disclosure.
-
-    This model supports a four-step flow:
-    1. No parameters → List available exchanges
-    2. Connector only → Show required credential fields
-    3. Connector + credentials, no account → Select account from available accounts
-    4. All parameters → Connect the exchange (with override confirmation if needed)
-    """
-
-    account: str | None = Field(
-        default=None, description="Account name to add credentials to. If not provided, uses the default account."
-    )
-
-    connector: str | None = Field(
-        default=None,
-        description="Exchange connector name (e.g., 'binance', 'coinbase_pro'). Leave empty to list available connectors.",
-        examples=["binance", "coinbase_pro", "kraken", "gate_io"],
-    )
-
-    credentials: dict[str, Any] | None = Field(
-        default=None,
-        description="Credentials object with required fields for the connector. Leave empty to see required fields first.",
-        examples=[
-            {"binance_api_key": "your_api_key", "binance_secret_key": "your_secret"},
-            {
-                "coinbase_pro_api_key": "your_key",
-                "coinbase_pro_secret_key": "your_secret",
-                "coinbase_pro_passphrase": "your_passphrase",
-            },
-        ],
-    )
-
-    confirm_override: bool | None = Field(
-        default=None,
-        description="Explicit confirmation to override existing connector. Required when connector already exists.",
-    )
-
-    @field_validator("connector")
-    @classmethod
-    def validate_connector_name(cls, v: str | None) -> str | None:
-        """Validate connector name format if provided"""
-        if v is not None:
-            # Convert to lowercase and replace spaces/hyphens with underscores
-            v = v.lower().replace(" ", "_").replace("-", "_")
-
-            # Basic validation - should be alphanumeric with underscores
-            if not v.replace("_", "").isalnum():
-                raise ValueError("Connector name should contain only letters, numbers, and underscores")
-
-        return v
-
-    @field_validator("credentials")
-    @classmethod
-    def validate_credentials(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Validate credentials format if provided"""
-        if v is not None:
-            if not isinstance(v, dict):
-                raise ValueError("Credentials must be a dictionary/object")
-
-            if not v:  # Empty dict
-                raise ValueError("Credentials cannot be empty. Omit the field to see required fields.")
-
-            # Check that all values are strings (typical for API credentials)
-            # except for force_override which can be boolean
-            for key, value in v.items():
-                if key == "force_override":
-                    if not isinstance(value, bool):
-                        raise ValueError("'force_override' must be a boolean (true/false)")
-                else:
-                    if not isinstance(value, str):
-                        raise ValueError(f"Credential '{key}' must be a string")
-                    if not value.strip():  # Empty or whitespace-only
-                        raise ValueError(f"Credential '{key}' cannot be empty")
-
-        return v
-
-    def get_account_name(self) -> str:
-        """Get account name with fallback to default"""
-        return self.account or settings.default_account
-
-    def get_flow_stage(self) -> str:
-        """Determine which stage of the setup flow we're in"""
-
-        if self.connector is None:
-            return "list_exchanges"
-        elif self.credentials is None:
-            return "show_config"
-        elif self.account is None:
-            return "select_account"
-        else:
-            return "connect"
-
-    def requires_override_confirmation(self) -> bool:
-        """Check if this request needs override confirmation"""
-        return self.credentials is not None and self.confirm_override is None
+# Re-export for backwards compatibility
+__all__ = ["SetupConnectorRequest", "setup_connector"]
 
 
 async def _check_existing_connector(account_name: str, connector_name: str) -> bool:
@@ -126,19 +30,117 @@ async def _check_existing_connector(account_name: str, connector_name: str) -> b
 
 
 async def setup_connector(request: SetupConnectorRequest) -> dict[str, Any]:
-    """Setup a new exchange connector with credentials using progressive disclosure.
+    """Setup or delete an exchange connector with credentials using progressive disclosure.
 
-    This function handles four different flows based on the provided parameters:
+    Setup flow:
     1. No connector → List available exchanges
     2. Connector only → Show required credential fields
     3. Connector + credentials, no account → Select account from available accounts
     4. All parameters → Connect the exchange (with override confirmation if needed)
+
+    Delete flow:
+    1. action="delete" only → List accounts and their configured connectors
+    2. action="delete" + connector → Show which accounts have this connector
+    3. action="delete" + connector + account → Delete the credential
     """
     try:
         client = await hummingbot_client.get_client()
         flow_stage = request.get_flow_stage()
 
-        if flow_stage == "select_account":
+        # ============================
+        # Delete Flow
+        # ============================
+
+        if flow_stage == "delete_list":
+            # List all accounts and their configured connectors
+            accounts = await client.accounts.list_accounts()
+            credentials_tasks = [
+                client.accounts.list_account_credentials(account_name=account_name)
+                for account_name in accounts
+            ]
+            credentials = await asyncio.gather(*credentials_tasks)
+
+            account_connectors = {}
+            for account, creds in zip(accounts, credentials):
+                account_connectors[account] = creds if creds else []
+
+            return {
+                "action": "delete_list",
+                "message": "Configured connectors by account:",
+                "account_connectors": account_connectors,
+                "next_step": "Call again with action='delete' and 'connector' to select which connector to remove",
+                "example": "Use action='delete', connector='binance' to remove Binance credentials",
+            }
+
+        elif flow_stage == "delete_select_account":
+            # Show which accounts have this connector configured
+            accounts = await client.accounts.list_accounts()
+            credentials_tasks = [
+                client.accounts.list_account_credentials(account_name=account_name)
+                for account_name in accounts
+            ]
+            credentials = await asyncio.gather(*credentials_tasks)
+
+            matching_accounts = []
+            for account, creds in zip(accounts, credentials):
+                if request.connector in (creds or []):
+                    matching_accounts.append(account)
+
+            if not matching_accounts:
+                return {
+                    "action": "delete_not_found",
+                    "message": f"Connector '{request.connector}' is not configured on any account",
+                    "connector": request.connector,
+                    "next_step": "Use action='delete' without a connector to see all configured connectors",
+                }
+
+            return {
+                "action": "delete_select_account",
+                "message": f"Connector '{request.connector}' is configured on the following accounts:",
+                "connector": request.connector,
+                "accounts": matching_accounts,
+                "default_account": settings.default_account,
+                "next_step": "Call again with 'account' to specify which account to delete from",
+                "example": f"Use action='delete', connector='{request.connector}', "
+                           f"account='{matching_accounts[0]}' to delete",
+            }
+
+        elif flow_stage == "delete":
+            # Actually delete the credential
+            account_name = request.get_account_name()
+
+            # Verify the connector exists before deleting
+            connector_exists = await _check_existing_connector(account_name, request.connector)
+            if not connector_exists:
+                return {
+                    "action": "delete_not_found",
+                    "message": f"Connector '{request.connector}' is not configured on account '{account_name}'",
+                    "account": account_name,
+                    "connector": request.connector,
+                    "next_step": "Use action='delete' without parameters to see all configured connectors",
+                }
+
+            try:
+                await client.accounts.delete_credential(
+                    account_name=account_name,
+                    connector_name=request.connector,
+                )
+
+                return {
+                    "action": "credentials_deleted",
+                    "message": f"Successfully deleted {request.connector} credentials from account {account_name}",
+                    "account": account_name,
+                    "connector": request.connector,
+                    "next_step": "Use setup_connector() to see remaining configured connectors",
+                }
+            except Exception as e:
+                raise ToolError(f"Failed to delete credentials for {request.connector}: {str(e)}")
+
+        # ============================
+        # Setup Flow
+        # ============================
+
+        elif flow_stage == "select_account":
             # Step 2.5: List available accounts for selection (after connector and credentials are provided)
             accounts = await client.accounts.list_accounts()
 
