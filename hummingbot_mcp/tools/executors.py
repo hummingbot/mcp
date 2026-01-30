@@ -1,0 +1,591 @@
+"""
+Executor management tools for Hummingbot MCP Server.
+
+This module provides business logic for managing trading executors including
+creation, viewing, stopping, and position management with progressive disclosure.
+"""
+import logging
+from typing import Any
+
+from hummingbot_mcp.executor_preferences import executor_preferences
+from hummingbot_mcp.formatters.executors import (
+    format_executor_detail,
+    format_executor_schema_table,
+    format_executor_summary,
+    format_executor_types_detailed,
+    format_executors_table,
+    format_positions_held_table,
+    format_positions_summary,
+)
+from hummingbot_mcp.schemas import ManageExecutorPositionsRequest, ManageExecutorsRequest
+
+logger = logging.getLogger("hummingbot-mcp")
+
+# Re-export for backwards compatibility
+__all__ = [
+    "ManageExecutorsRequest",
+    "ManageExecutorPositionsRequest",
+    "EXECUTOR_TYPE_DESCRIPTIONS",
+    "manage_executors",
+    "manage_executor_positions",
+]
+
+# Executor type descriptions for helping users choose the right executor
+EXECUTOR_TYPE_DESCRIPTIONS = {
+    "position_executor": {
+        "name": "position_executor",
+        "description": "Takes directional positions with defined entry, stop-loss, and take-profit levels",
+        "use_when": "Clear directional view, want automated SL/TP, defined risk/reward",
+        "avoid_when": "Want to provide liquidity, need multi-leg strategies",
+    },
+    "dca_executor": {
+        "name": "dca_executor",
+        "description": "Dollar-cost averages into positions over time with scheduled purchases",
+        "use_when": "Accumulating gradually, reducing timing risk, building long-term position",
+        "avoid_when": "Need immediate full entry, want quick exits",
+    },
+    "arbitrage_executor": {
+        "name": "arbitrage_executor",
+        "description": "Captures price differences between exchanges or trading pairs",
+        "use_when": "Identified price discrepancies, low-risk profit from inefficiencies",
+        "avoid_when": "Differences too small for fees, insufficient capital on both sides",
+    },
+    "grid_executor": {
+        "name": "grid_executor",
+        "description": "Trades in ranging markets with multiple buy/sell levels in a grid pattern",
+        "use_when": "Range-bound market, profit from volatility, want auto-rebalancing",
+        "avoid_when": "Strongly trending market, limited capital for spread across levels",
+        "notes": """
+**Grid Price Logic:**
+- start_price: Always the LOWER bound of the grid
+- end_price: Always the UPPER bound of the grid
+- limit_price: Determines grid direction (LONG vs SHORT)
+
+**Direction Rules:**
+- LONG grid:  limit_price < start_price < end_price (limit below grid, buys low)
+- SHORT grid: start_price < end_price < limit_price (limit above grid, sells high)
+
+**Example (BTC at $85,000):**
+- LONG grid to buy dips: start=82000, end=84000, limit=81000
+- SHORT grid to sell rallies: start=86000, end=88000, limit=89000
+
+**Key Parameters:**
+- start_price: Lower grid boundary
+- end_price: Upper grid boundary
+- limit_price: Entry trigger price (determines LONG vs SHORT)
+- total_amount_quote: Total capital allocation
+- min_spread_between_orders: Spread between grid levels (e.g., 0.0001 = 0.01%)
+- min_order_amount_quote: Minimum order size in quote currency
+- max_open_orders: Maximum concurrent open orders
+
+**Risk Management:**
+- triple_barrier_config: Contains take_profit, stop_loss, time_limit settings
+- coerce_tp_to_step: When True, take profit = max(grid_step, take_profit)
+  - Ensures TP is at least as large as the distance between grid levels
+  - Prevents closing positions before reaching the next grid level
+  - Default: False (uses take_profit as-is)""",
+    },
+    "xemm_executor": {
+        "name": "xemm_executor",
+        "description": "Cross-Exchange Market Making - provides liquidity across multiple exchanges",
+        "use_when": "Want spread earnings, have multi-exchange access, can manage inventory",
+        "avoid_when": "New to market making, cannot monitor positions regularly",
+    },
+}
+
+
+async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict[str, Any]:
+    """
+    Manage executors with progressive disclosure.
+
+    Args:
+        client: Hummingbot API client
+        request: ManageExecutorsRequest with action and parameters
+
+    Returns:
+        Dictionary containing results and formatted output
+    """
+    flow_stage = request.get_flow_stage()
+
+    if flow_stage == "list_types":
+        # Stage 1: List available executor types with descriptions
+        try:
+            available_types = await client.executors.get_available_executor_types()
+        except Exception:
+            # Fallback to our known types if API doesn't support this
+            available_types = list(EXECUTOR_TYPE_DESCRIPTIONS.keys())
+
+        # Build type info list
+        type_info_list = []
+        for exec_type in available_types:
+            if exec_type in EXECUTOR_TYPE_DESCRIPTIONS:
+                type_info_list.append(EXECUTOR_TYPE_DESCRIPTIONS[exec_type])
+            else:
+                type_info_list.append({
+                    "name": exec_type,
+                    "description": f"Executor type: {exec_type}",
+                    "use_when": "Check documentation for details",
+                    "avoid_when": "Check documentation for details",
+                })
+
+        formatted = format_executor_types_detailed(type_info_list)
+
+        return {
+            "action": "list_types",
+            "executor_types": type_info_list,
+            "available_types": available_types,
+            "formatted_output": formatted,
+            "next_step": "Call again with 'executor_type' to see the configuration schema",
+            "example": "manage_executors(executor_type='position_executor')",
+        }
+
+    elif flow_stage == "show_schema":
+        # Stage 2: Show config schema with user defaults
+        try:
+            schema = await client.executors.get_executor_config_schema(request.executor_type)
+        except Exception as e:
+            return {
+                "action": "show_schema",
+                "error": f"Failed to get schema for {request.executor_type}: {e}",
+                "formatted_output": f"Error: Failed to get schema for {request.executor_type}: {e}",
+            }
+
+        # Get user defaults
+        user_defaults = executor_preferences.get_defaults(request.executor_type)
+
+        # Get type description
+        type_info = EXECUTOR_TYPE_DESCRIPTIONS.get(request.executor_type, {})
+
+        formatted = f"Configuration Schema for {request.executor_type}\n\n"
+        if type_info:
+            formatted += f"{type_info.get('description', '')}\n"
+            formatted += f"Use when: {type_info.get('use_when', '')}\n"
+            formatted += f"Avoid when: {type_info.get('avoid_when', '')}\n"
+            # Add notes if available (e.g., for grid_executor)
+            if type_info.get("notes"):
+                formatted += f"\n{type_info.get('notes')}\n"
+            formatted += "\n"
+
+        formatted += format_executor_schema_table(schema, user_defaults)
+
+        if user_defaults:
+            formatted += f"\n\nYour saved defaults for {request.executor_type}:\n"
+            for key, value in user_defaults.items():
+                formatted += f"  {key}: {value}\n"
+            formatted += f"\nPreferences file: {executor_preferences.get_preferences_path()}"
+
+        return {
+            "action": "show_schema",
+            "executor_type": request.executor_type,
+            "schema": schema,
+            "user_defaults": user_defaults,
+            "type_info": type_info,
+            "formatted_output": formatted,
+            "next_step": "Call with action='create' and executor_config to create an executor",
+            "example": f"manage_executors(action='create', executor_type='{request.executor_type}', executor_config={{...}})",
+        }
+
+    elif flow_stage == "create":
+        # Stage 3: Create executor
+        executor_type = request.executor_type or request.executor_config.get("type") or request.executor_config.get("executor_type")
+
+        if not executor_type:
+            return {
+                "action": "create",
+                "error": "executor_type is required for creating an executor",
+                "formatted_output": "Error: Please provide executor_type",
+            }
+
+        # Merge with defaults
+        merged_config = executor_preferences.merge_with_defaults(executor_type, request.executor_config)
+
+        # Ensure type is set in config
+        if "type" not in merged_config and "executor_type" not in merged_config:
+            merged_config["type"] = executor_type
+
+        account = request.account_name or "master_account"
+
+        try:
+            result = await client.executors.create_executor(
+                executor_config=merged_config,
+                account_name=account,
+            )
+
+            # Save as default if requested
+            if request.save_as_default:
+                executor_preferences.update_defaults(executor_type, request.executor_config)
+
+            formatted = f"Executor created successfully!\n\n"
+            formatted += f"Executor ID: {result.get('id', 'N/A')}\n"
+            formatted += f"Type: {executor_type}\n"
+            formatted += f"Account: {account}\n"
+
+            if request.save_as_default:
+                formatted += f"\nConfiguration saved as default for {executor_type}"
+
+            return {
+                "action": "create",
+                "executor_id": result.get("id"),
+                "executor_type": executor_type,
+                "account": account,
+                "config_used": merged_config,
+                "saved_as_default": request.save_as_default,
+                "result": result,
+                "formatted_output": formatted,
+            }
+
+        except Exception as e:
+            return {
+                "action": "create",
+                "error": str(e),
+                "formatted_output": f"Error creating executor: {e}",
+            }
+
+    elif flow_stage == "search":
+        # Stage 4: Search executors
+        try:
+            result = await client.executors.search_executors(
+                account_names=request.account_names,
+                connector_names=request.connector_names,
+                trading_pairs=request.trading_pairs,
+                executor_types=request.executor_types,
+                status=request.status,
+                cursor=request.cursor,
+                limit=request.limit,
+            )
+
+            executors = result.get("data", result) if isinstance(result, dict) else result
+            if not isinstance(executors, list):
+                executors = [executors] if executors else []
+
+            formatted = f"Executors Found: {len(executors)}\n\n"
+            formatted += format_executors_table(executors)
+
+            # Add pagination info if available
+            if isinstance(result, dict) and "next_cursor" in result:
+                formatted += f"\n\nNext cursor: {result.get('next_cursor')}"
+
+            return {
+                "action": "search",
+                "executors": executors,
+                "count": len(executors),
+                "cursor": result.get("next_cursor") if isinstance(result, dict) else None,
+                "formatted_output": formatted,
+            }
+
+        except Exception as e:
+            return {
+                "action": "search",
+                "error": str(e),
+                "formatted_output": f"Error searching executors: {e}",
+            }
+
+    elif flow_stage == "get":
+        # Stage 5: Get specific executor
+        try:
+            result = await client.executors.get_executor(request.executor_id)
+
+            formatted = format_executor_detail(result)
+
+            return {
+                "action": "get",
+                "executor_id": request.executor_id,
+                "executor": result,
+                "formatted_output": formatted,
+            }
+
+        except Exception as e:
+            return {
+                "action": "get",
+                "error": str(e),
+                "formatted_output": f"Error getting executor {request.executor_id}: {e}",
+            }
+
+    elif flow_stage == "stop":
+        # Stage 6: Stop executor
+        try:
+            result = await client.executors.stop_executor(
+                executor_id=request.executor_id,
+                keep_position=request.keep_position,
+            )
+
+            formatted = f"Executor stopped successfully!\n\n"
+            formatted += f"Executor ID: {request.executor_id}\n"
+            formatted += f"Keep Position: {request.keep_position}\n"
+
+            return {
+                "action": "stop",
+                "executor_id": request.executor_id,
+                "keep_position": request.keep_position,
+                "result": result,
+                "formatted_output": formatted,
+            }
+
+        except Exception as e:
+            return {
+                "action": "stop",
+                "error": str(e),
+                "formatted_output": f"Error stopping executor {request.executor_id}: {e}",
+            }
+
+    elif flow_stage == "get_summary":
+        # Stage 7: Get overall summary with positions and recent executors
+        try:
+            result = await client.executors.get_summary()
+
+            formatted = format_executor_summary(result)
+
+            # Fetch positions held
+            positions = []
+            try:
+                positions_result = await client.executors.get_positions_summary()
+                positions = positions_result.get("positions", positions_result) if isinstance(positions_result, dict) else positions_result
+                if not isinstance(positions, list):
+                    positions = [positions] if positions else []
+
+                if positions:
+                    formatted += "\n\nPositions Held:\n"
+                    formatted += format_positions_held_table(positions)
+            except Exception:
+                # If fetching positions fails, continue without them
+                pass
+
+            # Also fetch last 10 executors to show recent activity
+            recent_executors = []
+            try:
+                recent_result = await client.executors.search_executors(limit=10)
+                recent_executors = recent_result.get("data", recent_result) if isinstance(recent_result, dict) else recent_result
+                if not isinstance(recent_executors, list):
+                    recent_executors = [recent_executors] if recent_executors else []
+
+                if recent_executors:
+                    formatted += "\n\nRecent Executors (last 10):\n"
+                    formatted += format_executors_table(recent_executors)
+            except Exception:
+                # If fetching recent executors fails, just show the summary
+                pass
+
+            return {
+                "action": "get_summary",
+                "summary": result,
+                "positions": positions,
+                "recent_executors": recent_executors,
+                "formatted_output": formatted,
+            }
+
+        except Exception as e:
+            return {
+                "action": "get_summary",
+                "error": str(e),
+                "formatted_output": f"Error getting executor summary: {e}",
+            }
+
+    elif flow_stage == "get_preferences":
+        # Stage 8: Get saved preferences
+        if request.executor_type:
+            # Get preferences for specific executor type
+            defaults = executor_preferences.get_defaults(request.executor_type)
+            type_info = EXECUTOR_TYPE_DESCRIPTIONS.get(request.executor_type, {})
+
+            formatted = f"Preferences for {request.executor_type}\n\n"
+            if type_info.get("notes"):
+                formatted += f"{type_info.get('notes')}\n\n"
+
+            if defaults:
+                formatted += "Your saved defaults:\n"
+                for key, value in defaults.items():
+                    formatted += f"  {key}: {value}\n"
+            else:
+                formatted += "No preferences saved yet.\n"
+
+            formatted += f"\nPreferences file: {executor_preferences.get_preferences_path()}"
+
+            return {
+                "action": "get_preferences",
+                "executor_type": request.executor_type,
+                "preferences": defaults,
+                "formatted_output": formatted,
+            }
+        else:
+            # Get all preferences
+            all_defaults = executor_preferences.get_all_defaults()
+
+            formatted = "All Executor Preferences\n\n"
+            formatted += f"Preferences file: {executor_preferences.get_preferences_path()}\n\n"
+
+            if all_defaults:
+                for exec_type, defaults in all_defaults.items():
+                    formatted += f"## {exec_type}\n"
+                    for key, value in defaults.items():
+                        formatted += f"  {key}: {value}\n"
+                    formatted += "\n"
+            else:
+                formatted += "No preferences saved yet.\n"
+
+            return {
+                "action": "get_preferences",
+                "all_preferences": all_defaults,
+                "formatted_output": formatted,
+            }
+
+    elif flow_stage == "set_preferences":
+        # Stage 9: Set preferences for an executor type
+        executor_preferences.update_defaults(request.executor_type, request.executor_config)
+
+        formatted = f"Preferences updated for {request.executor_type}\n\n"
+        formatted += "New defaults:\n"
+        for key, value in request.executor_config.items():
+            formatted += f"  {key}: {value}\n"
+        formatted += f"\nPreferences file: {executor_preferences.get_preferences_path()}"
+
+        return {
+            "action": "set_preferences",
+            "executor_type": request.executor_type,
+            "preferences": request.executor_config,
+            "formatted_output": formatted,
+        }
+
+    elif flow_stage == "reset_preferences":
+        # Stage 10: Reset preferences to defaults
+        executor_preferences.reset_to_defaults()
+
+        formatted = "Preferences reset to defaults.\n\n"
+        formatted += f"Preferences file: {executor_preferences.get_preferences_path()}"
+
+        return {
+            "action": "reset_preferences",
+            "formatted_output": formatted,
+        }
+
+    else:
+        return {
+            "action": "unknown",
+            "error": f"Unknown flow stage: {flow_stage}",
+            "formatted_output": f"Error: Unknown flow stage: {flow_stage}",
+        }
+
+
+async def manage_executor_positions(client: Any, request: ManageExecutorPositionsRequest) -> dict[str, Any]:
+    """
+    Manage executor positions with progressive disclosure.
+
+    Args:
+        client: Hummingbot API client
+        request: ManageExecutorPositionsRequest with action and parameters
+
+    Returns:
+        Dictionary containing results and formatted output
+    """
+    flow_stage = request.get_flow_stage()
+    account = request.account_name or "master_account"
+
+    if flow_stage == "get_summary":
+        # Stage 1: Get positions summary
+        try:
+            result = await client.executors.get_positions_summary()
+
+            # Handle different response formats
+            positions = result.get("positions", result) if isinstance(result, dict) else result
+            if not isinstance(positions, list):
+                positions = [positions] if positions else []
+
+            formatted = f"Positions Held Summary\n\n"
+
+            if isinstance(result, dict) and any(k in result for k in ["total_positions", "total_value", "by_connector"]):
+                formatted += format_positions_summary(result)
+                # Also show positions table if positions are available
+                if positions:
+                    formatted += "\n\nPositions Detail:\n"
+                    formatted += format_positions_held_table(positions)
+            else:
+                formatted += format_positions_held_table(positions)
+
+            return {
+                "action": "get_summary",
+                "positions": positions,
+                "summary": result if isinstance(result, dict) else {"positions": positions},
+                "formatted_output": formatted,
+                "next_step": "Call with connector_name and trading_pair to see specific position details",
+            }
+
+        except Exception as e:
+            return {
+                "action": "get_summary",
+                "error": str(e),
+                "formatted_output": f"Error getting positions summary: {e}",
+            }
+
+    elif flow_stage == "get_position":
+        # Stage 2: Get specific position
+        try:
+            result = await client.executors.get_position_held(
+                connector_name=request.connector_name,
+                trading_pair=request.trading_pair,
+                account_name=account,
+            )
+
+            formatted = f"Position Details\n\n"
+            formatted += f"Connector: {request.connector_name}\n"
+            formatted += f"Trading Pair: {request.trading_pair}\n"
+            formatted += f"Account: {account}\n\n"
+
+            if result:
+                # Format as single-item table
+                positions = [result] if not isinstance(result, list) else result
+                formatted += format_positions_held_table(positions)
+            else:
+                formatted += "No position found for this connector/pair combination."
+
+            return {
+                "action": "get_position",
+                "connector_name": request.connector_name,
+                "trading_pair": request.trading_pair,
+                "account": account,
+                "position": result,
+                "formatted_output": formatted,
+                "next_step": "Use action='clear' if you need to clear this position",
+            }
+
+        except Exception as e:
+            return {
+                "action": "get_position",
+                "error": str(e),
+                "formatted_output": f"Error getting position: {e}",
+            }
+
+    elif flow_stage == "clear":
+        # Stage 3: Clear position
+        try:
+            result = await client.executors.clear_position_held(
+                connector_name=request.connector_name,
+                trading_pair=request.trading_pair,
+                account_name=account,
+            )
+
+            formatted = f"Position cleared successfully!\n\n"
+            formatted += f"Connector: {request.connector_name}\n"
+            formatted += f"Trading Pair: {request.trading_pair}\n"
+            formatted += f"Account: {account}\n"
+
+            return {
+                "action": "clear",
+                "connector_name": request.connector_name,
+                "trading_pair": request.trading_pair,
+                "account": account,
+                "result": result,
+                "formatted_output": formatted,
+            }
+
+        except Exception as e:
+            return {
+                "action": "clear",
+                "error": str(e),
+                "formatted_output": f"Error clearing position: {e}",
+            }
+
+    else:
+        return {
+            "action": "unknown",
+            "error": f"Unknown flow stage: {flow_stage}",
+            "formatted_output": f"Error: Unknown flow stage: {flow_stage}",
+        }
