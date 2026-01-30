@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "hummingbot-api-client==1.2.0",
+    "hummingbot-api-client==1.2.8",
     "mcp[cli]>=1.6.0",
     "pydantic>=2.11.2",
     "python-dotenv>=1.0.0",
