@@ -104,17 +104,18 @@ def format_executors_table(executors: list[dict[str, Any]]) -> str:
         return "No executors found."
 
     # Header
-    header = "id                                           | type            | connector         | pair       | status   | side | volume      | pnl       | created"
-    separator = format_table_separator(175)
+    header = "id                                           | type            | connector         | pair       | status     | close_type           | side | volume      | pnl       | created"
+    separator = format_table_separator(210)
 
     # Format each executor as a row
     rows = []
     for executor in executors:
-        exec_id = str(get_field(executor, "id", "executor_id", default=""))[:44]  # Executor IDs are 44 chars
+        exec_id = str(get_field(executor, "id", "executor_id", default=""))
         exec_type = str(get_field(executor, "type", "executor_type", default="unknown"))[:15]
         connector = str(get_field(executor, "connector_name", default=""))[:17]
         trading_pair = str(get_field(executor, "trading_pair", default=""))[:10]
-        status = str(get_field(executor, "status", default="unknown"))[:8]
+        status = str(get_field(executor, "status", default="unknown"))
+        close_type = str(get_field(executor, "close_type", default="") or "")
 
         # Get side from top level or from custom_info
         side = get_field(executor, "side", default=None)
@@ -129,7 +130,7 @@ def format_executors_table(executors: list[dict[str, Any]]) -> str:
 
         created = format_timestamp(get_field(executor, "timestamp", "created_at", default=0))
 
-        row = f"{exec_id:44} | {exec_type:15} | {connector:17} | {trading_pair:10} | {status:8} | {side:4} | {volume:>11} | {pnl:>9} | {created}"
+        row = f"{exec_id:44} | {exec_type:15} | {connector:17} | {trading_pair:10} | {status:10} | {close_type:20} | {side:4} | {volume:>11} | {pnl:>9} | {created}"
         rows.append(row)
 
     return f"{header}\n{separator}\n" + "\n".join(rows)
@@ -155,6 +156,11 @@ def format_executor_detail(executor: dict[str, Any]) -> str:
     output += f"ID: {get_field(executor, 'id', 'executor_id', default='N/A')}\n"
     output += f"Type: {get_field(executor, 'type', 'executor_type', default='N/A')}\n"
     output += f"Status: {get_field(executor, 'status', default='N/A')}\n"
+
+    close_type = get_field(executor, "close_type", default=None)
+    if close_type:
+        output += f"Close Type: {close_type}\n"
+
     output += f"Connector: {get_field(executor, 'connector_name', default='N/A')}\n"
     output += f"Trading Pair: {get_field(executor, 'trading_pair', default='N/A')}\n"
 
