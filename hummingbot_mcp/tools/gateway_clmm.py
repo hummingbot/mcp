@@ -11,7 +11,7 @@ from typing import Any
 
 from hummingbot_mcp.exceptions import ToolError
 from hummingbot_mcp.formatters.base import format_number, get_field
-from hummingbot_mcp.schemas import GatewayCLMMPoolRequest, GatewayCLMMPositionRequest
+from hummingbot_mcp.schemas import GatewayCLMMRequest
 
 logger = logging.getLogger("hummingbot-mcp")
 
@@ -109,7 +109,22 @@ def format_pools_as_detailed_table(pools: list[dict[str, Any]]) -> str:
     return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
-async def explore_gateway_clmm_pools(client: Any, request: GatewayCLMMPoolRequest) -> dict[str, Any]:
+async def manage_gateway_clmm(client: Any, request: GatewayCLMMRequest) -> dict[str, Any]:
+    """
+    Unified CLMM management: pool exploration and position management.
+
+    Routes to explore_gateway_clmm_pools for list_pools/get_pool_info
+    and manage_gateway_clmm_positions for open/close/collect/get positions.
+    """
+    if request.action in ("list_pools", "get_pool_info"):
+        return await explore_gateway_clmm_pools(client, request)
+    elif request.action in ("open_position", "close_position", "collect_fees", "get_positions"):
+        return await manage_gateway_clmm_positions(client, request)
+    else:
+        raise ToolError(f"Unknown action: {request.action}")
+
+
+async def explore_gateway_clmm_pools(client: Any, request: GatewayCLMMRequest) -> dict[str, Any]:
     """
     Explore Gateway CLMM pools: list pools and get pool information.
 
@@ -190,7 +205,7 @@ async def explore_gateway_clmm_pools(client: Any, request: GatewayCLMMPoolReques
         raise ToolError(f"Unknown action: {request.action}")
 
 
-async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMPositionRequest) -> dict[str, Any]:
+async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMRequest) -> dict[str, Any]:
     """
     Manage Gateway CLMM positions: open, close, collect fees, and get positions.
 
