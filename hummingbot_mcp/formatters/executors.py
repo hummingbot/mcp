@@ -54,39 +54,6 @@ def format_executor_types_table(executor_types: list[dict[str, Any]]) -> str:
     return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
-def format_executor_types_detailed(executor_types: list[dict[str, Any]]) -> str:
-    """
-    Format executor types with full descriptions in a readable format.
-
-    Args:
-        executor_types: List of executor type dictionaries
-
-    Returns:
-        Formatted detailed description string
-    """
-    if not executor_types:
-        return "No executor types available."
-
-    output = "Available Executor Types:\n\n"
-
-    for exec_type in executor_types:
-        name = get_field(exec_type, "name", default="unknown")
-        description = get_field(exec_type, "description", default="No description available")
-        use_when = get_field(exec_type, "use_when", default="")
-        avoid_when = get_field(exec_type, "avoid_when", default="")
-
-        output += f"## {name}\n"
-        output += f"{description}\n\n"
-
-        if use_when and use_when != "N/A":
-            output += f"**Use when:** {use_when}\n"
-        if avoid_when and avoid_when != "N/A":
-            output += f"**Avoid when:** {avoid_when}\n"
-
-        output += "\n"
-
-    return output.strip()
-
 
 def format_executors_table(executors: list[dict[str, Any]]) -> str:
     """

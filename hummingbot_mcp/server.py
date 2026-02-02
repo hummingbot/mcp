@@ -777,10 +777,38 @@ async def manage_executors(
     and arbitrage. Use executors FIRST unless the user explicitly asks for "controllers" or "bots".
 
     Available Executor Types:
-    - order_executor: Simple BUY/SELL order with execution strategy (LIMIT, MARKET, LIMIT_MAKER, LIMIT_CHASER)
-    - grid_executor: Grid trading strategy (buy/sell at multiple price levels)
-    - position_executor: Directional trading with entry, stop-loss, and take-profit
-    - dca_executor: Dollar-cost averaging for gradual position building
+
+    ## position_executor
+    Takes directional positions with defined entry, stop-loss, and take-profit levels.
+    Use when: Clear directional view, want automated SL/TP, defined risk/reward.
+    Avoid when: Want to provide liquidity, need multi-leg strategies.
+
+    ## dca_executor
+    Dollar-cost averages into positions over time with scheduled purchases.
+    Use when: Accumulating gradually, reducing timing risk, building long-term position.
+    Avoid when: Need immediate full entry, want quick exits.
+
+    ## grid_executor
+    Trades in ranging markets with multiple buy/sell levels in a grid pattern.
+    Use when: Range-bound market, profit from volatility, want auto-rebalancing.
+    Avoid when: Strongly trending market, limited capital for spread across levels.
+    Direction rules:
+    - LONG grid:  limit_price < start_price < end_price (limit below grid, buys low)
+    - SHORT grid: start_price < end_price < limit_price (limit above grid, sells high)
+    - side must be explicitly set: 1=BUY (LONG), 2=SELL (SHORT)
+    Risk management (NO stop_loss):
+    - limit_price is the safety boundary — when price crosses it, the grid stops.
+    - keep_position=false: closes position on stop (stop-loss-like exit).
+    - keep_position=true: holds position on stop (wait for recovery).
+
+    ## order_executor
+    Simple order execution with retry logic and multiple execution strategies.
+    Closest executor to a plain BUY/SELL order but with strategy options.
+    Use when: Want to place a single buy or sell order with a specific execution strategy
+    (LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER).
+    Avoid when: Need complex multi-level strategies (use grid/dca instead),
+    want automated SL/TP management (use position_executor instead).
+    Execution strategies: MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER.
 
     Executors are automated trading components that execute specific strategies.
     This tool guides you through understanding, creating, monitoring, and stopping executors.
@@ -806,27 +834,26 @@ async def manage_executors(
     Always guide users to set `limit_price` as their risk boundary and choose `keep_position` accordingly.
 
     Progressive Flow:
-    1. No params → List available executor types with descriptions (when to use/avoid)
-    2. executor_type only → Show config schema with your saved defaults applied
-    3. action="create" + executor_config → Create executor (merged with your defaults)
-    4. action="search" → Search/list executors with filters
-    5. action="get" + executor_id → Get specific executor details
-    6. action="stop" + executor_id → Stop executor (with keep_position option)
-    7. action="get_summary" → Get overall executor summary
+    1. executor_type only → Show config schema with your saved defaults applied
+    2. action="create" + executor_config → Create executor (merged with your defaults)
+    3. action="search" → Search/list executors with filters
+    4. action="get" + executor_id → Get specific executor details
+    5. action="stop" + executor_id → Stop executor (with keep_position option)
+    6. action="get_summary" → Get overall executor summary
 
     Preference Management (stored in ~/.hummingbot_mcp/executor_preferences.md):
-    8. action="get_preferences" → View raw markdown preferences file (read before saving)
-    9. action="save_preferences" + preferences_content → Save complete preferences file content
-    10. action="reset_preferences" → Reset all preferences to defaults
+    7. action="get_preferences" → View raw markdown preferences file (read before saving)
+    8. action="save_preferences" + preferences_content → Save complete preferences file content
+    9. action="reset_preferences" → Reset all preferences to defaults
 
     Position Management:
-    11. action="positions_summary" → Get aggregated positions summary
-    12. action="get_position" + connector_name + trading_pair → Get specific position details
-    13. action="clear_position" + connector_name + trading_pair → Clear position closed manually
+    10. action="positions_summary" → Get aggregated positions summary
+    11. action="get_position" + connector_name + trading_pair → Get specific position details
+    12. action="clear_position" + connector_name + trading_pair → Clear position closed manually
 
     Args:
         action: Action to perform. Leave empty to see executor types or config schema.
-        executor_type: Type of executor (e.g., 'position_executor', 'dca_executor'). Leave empty to list types.
+        executor_type: Type of executor (e.g., 'position_executor', 'dca_executor'). Provide to see config schema.
         executor_config: Configuration for creating an executor. Required for 'create' action.
         executor_id: Executor ID for 'get' or 'stop' actions.
         account_names: Filter by account names (for search).

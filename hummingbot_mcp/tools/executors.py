@@ -12,7 +12,6 @@ from hummingbot_mcp.formatters.executors import (
     format_executor_detail,
     format_executor_schema_table,
     format_executor_summary,
-    format_executor_types_detailed,
     format_executors_table,
     format_positions_held_table,
     format_positions_summary,
@@ -104,32 +103,18 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
     flow_stage = request.get_flow_stage()
 
     if flow_stage == "list_types":
-        # Stage 1: List available executor types with descriptions
-        try:
-            available_types = await client.executors.get_available_executor_types()
-        except Exception:
-            # Fallback to our known types if API doesn't support this
-            available_types = list(EXECUTOR_TYPE_DESCRIPTIONS.keys())
-
-        # Build type info list
-        type_info_list = []
-        for exec_type in available_types:
-            if exec_type in EXECUTOR_TYPE_DESCRIPTIONS:
-                type_info_list.append(EXECUTOR_TYPE_DESCRIPTIONS[exec_type])
-            else:
-                type_info_list.append({
-                    "name": exec_type,
-                    "description": f"Executor type: {exec_type}",
-                    "use_when": "Check documentation for details",
-                    "avoid_when": "Check documentation for details",
-                })
-
-        formatted = format_executor_types_detailed(type_info_list)
+        # Brief static response — full descriptions are in the tool docstring
+        formatted = (
+            "Available Executor Types:\n\n"
+            "- **position_executor** — Directional trading with entry, stop-loss, and take-profit\n"
+            "- **dca_executor** — Dollar-cost averaging for gradual position building\n"
+            "- **grid_executor** — Grid trading across multiple price levels in ranging markets\n"
+            "- **order_executor** — Simple BUY/SELL order with execution strategy\n\n"
+            "Provide `executor_type` to see the configuration schema."
+        )
 
         return {
             "action": "list_types",
-            "executor_types": type_info_list,
-            "available_types": available_types,
             "formatted_output": formatted,
             "next_step": "Call again with 'executor_type' to see the configuration schema",
             "example": "manage_executors(executor_type='position_executor')",

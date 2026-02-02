@@ -50,7 +50,6 @@ from .executors import (
     format_executor_detail,
     format_executor_schema_table,
     format_executor_summary,
-    format_executor_types_detailed,
     format_executor_types_table,
     format_executors_table,
     format_positions_held_table,
@@ -111,7 +110,6 @@ __all__ = [
     "format_portfolio_as_table",
     # Executor formatters
     "format_executor_types_table",
-    "format_executor_types_detailed",
     "format_executors_table",
     "format_executor_detail",
     "format_positions_held_table",
