@@ -20,8 +20,12 @@ logger = logging.getLogger("hummingbot-mcp")
 PREFERENCES_DIR = Path.home() / ".hummingbot_mcp"
 PREFERENCES_FILE = PREFERENCES_DIR / "executor_preferences.md"
 
+# Template version — bump this when documentation content changes
+TEMPLATE_VERSION = "4"
+
 # Default template for the preferences file
-DEFAULT_PREFERENCES_TEMPLATE = """# Executor Preferences
+DEFAULT_PREFERENCES_TEMPLATE = """<!-- preferences-version: 4 -->
+# Executor Preferences
 
 This file stores your default configurations for different executor types.
 You can edit this file manually or use `save_as_default=true` when creating executors.
@@ -54,17 +58,27 @@ Best for: Dollar-cost averaging into positions over time.
 - You need immediate full position entry
 - You want active trading with quick exits
 
-### Arbitrage Executor
-Best for: Capturing price differences between exchanges or pairs.
+### Order Executor
+Best for: Placing a single buy or sell order with a specific execution strategy.
 
 **Use when:**
-- You've identified price discrepancies
-- You want low-risk profit from inefficiencies
-- You have accounts on multiple exchanges
+- You want a one-off buy or sell with reliable execution
+- You need a specific execution strategy (MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER)
+- You want simple order placement without multi-level complexity
 
 **Avoid when:**
-- Price differences are too small to cover fees
-- You don't have sufficient capital on both sides
+- You need multi-level strategies (use Grid or DCA instead)
+- You want automated stop-loss/take-profit management (use Position Executor instead)
+
+**Execution Strategies:**
+- `MARKET`: Immediate execution at current market price
+- `LIMIT`: Limit order at a specified price
+- `LIMIT_MAKER`: Post-only limit order (rejected if it would match immediately)
+- `LIMIT_CHASER`: Continuously chases best price, refreshing the limit order as the market moves
+
+**LIMIT_CHASER Config (chaser_config):**
+- `distance`: How far from best price to place the order (e.g., 0.001 = 0.1%)
+- `refresh_threshold`: How far price must move before refreshing (e.g., 0.0005 = 0.05%)
 
 ### Grid Executor
 Best for: Trading in ranging/sideways markets with multiple buy/sell levels.
@@ -78,29 +92,59 @@ Best for: Trading in ranging/sideways markets with multiple buy/sell levels.
 - Market is strongly trending (risk of one-sided fills)
 - You have limited capital (grids require capital spread across levels)
 
-**Limit Price Logic:**
-- LONG grid: `limit_price < start_price < end_price` (enter BELOW the grid range)
-- SHORT grid: `end_price < start_price < limit_price` (enter ABOVE the grid range)
+#### How Grid Trading Works
 
-**Key Parameters:**
-- `start_price` / `end_price`: Grid boundaries
-- `limit_price`: Entry trigger price (must follow the logic above)
-- `min_spread_between_orders`: Spread between grid levels (e.g., 0.0001 = 0.01%)
-- `min_order_amount_quote`: Minimum order size in quote currency
-- `total_amount_quote`: Total capital allocation
-- `max_open_orders`: Maximum concurrent open orders
+**LONG Grid (side: 1 = BUY):**
+- Places buy limit orders below current price across the range (start_price → end_price)
+- Each filled buy gets a corresponding sell order at take_profit distance
+- Instead of buying base asset at once, acquires it gradually via limit orders
+- If price rises above end_price → 100% quote currency, only realized profit from matched pairs
+- If price drops below limit_price → grid stops, accumulated base asset held
+  - `keep_position=true`: hold position (wait for recovery)
+  - `keep_position=false`: close position at loss
+- Take profit for levels above current price is calculated from the theoretical level price, not the entry price
 
-### XEMM Executor (Cross-Exchange Market Making)
-Best for: Market making across multiple exchanges.
+**SHORT Grid (side: 2 = SELL):**
+- Places sell limit orders above current price, each fill gets a buy at take_profit below
+- If price drops below start_price → all profit realized
+- If price rises above limit_price → grid stops, accumulated quote from sells
+- Useful for selling an existing position — generates yield while exiting
 
-**Use when:**
-- You want to provide liquidity and earn spread
-- You have access to multiple exchanges
-- You can manage inventory risk
+**CRITICAL:** `side` must be explicitly set (1=BUY, 2=SELL). `limit_price` alone does NOT determine direction.
 
-**Avoid when:**
-- You're new to market making
-- You can't monitor positions regularly
+**Direction Rules:**
+- LONG grid:  `limit_price < start_price < end_price` (limit below grid, buys low)
+- SHORT grid: `start_price < end_price < limit_price` (limit above grid, sells high)
+
+#### Parameter Reference
+
+**Grid Structure:**
+- `start_price` / `end_price`: Grid boundaries (lower/upper)
+- `limit_price`: Safety boundary (LONG: below start, SHORT: above end)
+- `total_amount_quote`: Capital allocated (quote currency). Must always be specified.
+
+**Grid Density — How Many Levels:**
+- `min_order_amount_quote`: Min size per order → max possible levels = `total_amount_quote / min_order_amount_quote`
+- `min_spread_between_orders`: Min price distance between levels (decimal, e.g. 0.0001 = 0.01%) → max levels from spread = `price_range / (spread * mid_price)`
+- **Actual levels = min(max_from_amount, max_from_spread)** — the intersection of both constraints
+
+**Order Placement Controls:**
+- `activation_bounds`: Only places orders within this % of current price (e.g. 0.001 = 0.1%). Protects liquidity, reduces rate limit usage. If not set, all orders placed at once.
+- `order_frequency`: Seconds between order batches. Spaces out submissions, prevents rate limits.
+- `max_orders_per_batch`: Max orders per batch. Combined with order_frequency, controls fill speed.
+- `max_open_orders`: Hard cap on concurrent open orders.
+
+**Take Profit & Risk:**
+- `triple_barrier_config.take_profit`: Profit target as decimal (0.0002 = 0.02%). Distance for the opposite order on fill.
+- `triple_barrier_config.open_order_type`: 1=MARKET, 2=LIMIT, 3=LIMIT_MAKER (recommended — post-only, earns maker fees)
+- `triple_barrier_config.take_profit_order_type`: Same enum. 3=LIMIT_MAKER recommended.
+- `coerce_tp_to_step`: When true, TP = max(grid_step, take_profit). Prevents closing before next level.
+
+**Risk Management — limit_price + keep_position (NO stop_loss):**
+- `limit_price` is the safety boundary — when price crosses it, the grid stops completely.
+- `keep_position=false`: closes the accumulated position on stop → acts as a stop-loss exit.
+- `keep_position=true`: holds the accumulated position on stop → wait for recovery.
+- There is NO `stop_loss` parameter. Never suggest it. `limit_price` + `keep_position` is the only risk mechanism for grids.
 
 ---
 
@@ -135,35 +179,43 @@ dca_executor:
 
 ### Grid Executor Defaults
 
+Note: This is a tight scalping configuration. Adjust prices and amounts to your market.
+
 ```yaml
 grid_executor:
-  # Add your default grid executor config here
-  # Remember: LONG -> limit < start < end | SHORT -> end < start < limit
-  # Example for LONG grid:
-  # connector_name: binance
+  # connector_name: binance_perpetual
   # trading_pair: BTC-USDT
-  # side: BUY
+  # side: 1  # 1=BUY (LONG grid), 2=SELL (SHORT grid)
   # start_price: 89000
   # end_price: 90000
   # limit_price: 88700  # Below start for LONG
-  # min_spread_between_orders: 0.0001  # 0.01% between levels
-  # min_order_amount_quote: 10
-  # total_amount_quote: 1000
-  # max_open_orders: 5
+  min_spread_between_orders: 0.0001  # 0.01% between levels
+  min_order_amount_quote: 6
+  # total_amount_quote: 100  # Always specify — capital in quote currency
+  max_open_orders: 15
+  activation_bounds: 0.001  # 0.1% — only place orders near current price
+  order_frequency: 5  # seconds between order batches
+  max_orders_per_batch: 1
+  keep_position: true
+  coerce_tp_to_step: true
+  triple_barrier_config:
+    take_profit: 0.0002  # 0.02%
+    open_order_type: 3  # LIMIT_MAKER (post-only, earns maker fees)
+    take_profit_order_type: 3  # LIMIT_MAKER
 ```
 
-### Arbitrage Executor Defaults
+### Order Executor Defaults
 
 ```yaml
-arbitrage_executor:
-  # Add your default arbitrage executor config here
-```
-
-### XEMM Executor Defaults
-
-```yaml
-xemm_executor:
-  # Add your default XEMM executor config here
+order_executor:
+  # Add your default order executor config here
+  # Example:
+  # connector_name: binance
+  # trading_pair: BTC-USDT
+  # side: 1  # 1=BUY, 2=SELL
+  # amount: "0.001"
+  # execution_strategy: LIMIT_MAKER
+  # price: "95000"
 ```
 
 ---
@@ -236,6 +288,38 @@ class ExecutorPreferencesManager:
                 continue
 
         return defaults
+
+    def get_executor_guide(self, executor_type: str) -> str | None:
+        """Extract the documentation guide section for a specific executor type.
+
+        Reads the preferences file and returns the markdown section under
+        '## Executor Type Guide' that corresponds to the given executor type
+        (e.g. 'grid_executor' → '### Grid Executor' section).
+
+        Args:
+            executor_type: The executor type (e.g., 'grid_executor')
+
+        Returns:
+            The markdown content of the guide section, or None if not found.
+        """
+        content = self._read_content()
+
+        # Map executor_type to section header prefix
+        # Some names don't title-case cleanly (DCA, XEMM), so use known mappings
+        _section_names = {
+            "dca_executor": "DCA Executor",
+        }
+        section_name = _section_names.get(
+            executor_type,
+            executor_type.replace("_", " ").title(),
+        )
+        # Match from ### {Name}... up to the next ### at the same level or --- separator
+        # The header may have extra text after the name (e.g. "XEMM Executor (Cross-Exchange ...)")
+        pattern = rf'(### {re.escape(section_name)}[^\n]*\n[\s\S]*?)(?=\n### |\n---)'
+        match = re.search(pattern, content)
+        if match:
+            return match.group(1).strip()
+        return None
 
     def get_defaults(self, executor_type: str) -> dict[str, Any]:
         """Get default configuration for an executor type.
@@ -370,10 +454,51 @@ class ExecutorPreferencesManager:
         """
         return str(self.preferences_path)
 
-    def reset_to_defaults(self) -> None:
-        """Reset the preferences file to the default template."""
+    def get_template_version(self) -> str | None:
+        """Read the preferences-version from the file.
+
+        Returns:
+            The version string if found, or None if no version comment is present.
+        """
+        content = self._read_content()
+        match = re.search(r'<!--\s*preferences-version:\s*(\S+)\s*-->', content)
+        return match.group(1) if match else None
+
+    def needs_documentation_update(self) -> bool:
+        """Check if the preferences file has outdated documentation.
+
+        Returns:
+            True if the file version is older than TEMPLATE_VERSION or missing.
+        """
+        file_version = self.get_template_version()
+        if file_version is None:
+            return True
+        return file_version != TEMPLATE_VERSION
+
+    def reset_to_defaults(self) -> dict[str, dict[str, Any]]:
+        """Reset the preferences file to the default template, preserving user YAML configs.
+
+        Saves all current YAML configurations, writes the new template,
+        then re-applies each saved config.
+
+        Returns:
+            Dictionary of preserved configs (executor_type -> config dict).
+        """
+        # Save current YAML configs before resetting
+        preserved = self.get_all_defaults()
+
+        # Write the new template
         self._write_template()
-        logger.info("Reset executor preferences to defaults")
+
+        # Re-apply each saved config
+        for executor_type, config in preserved.items():
+            if config:
+                self.update_defaults(executor_type, config)
+
+        logger.info(
+            f"Reset executor preferences to defaults, preserved {len(preserved)} config(s)"
+        )
+        return preserved
 
 
 # Global instance for convenience

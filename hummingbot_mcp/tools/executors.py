@@ -41,34 +41,22 @@ EXECUTOR_TYPE_DESCRIPTIONS = {
         "use_when": "Range-bound market, profit from volatility, want auto-rebalancing",
         "avoid_when": "Strongly trending market, limited capital for spread across levels",
         "notes": """
-**Grid Price Logic:**
-- start_price: Always the LOWER bound of the grid
-- end_price: Always the UPPER bound of the grid
-- limit_price: Determines grid direction (LONG vs SHORT)
-
 **Direction Rules:**
 - LONG grid:  limit_price < start_price < end_price (limit below grid, buys low)
 - SHORT grid: start_price < end_price < limit_price (limit above grid, sells high)
+- side must be explicitly set: 1=BUY (LONG), 2=SELL (SHORT)
 
 **Example (BTC at $85,000):**
-- LONG grid to buy dips: start=82000, end=84000, limit=81000
-- SHORT grid to sell rallies: start=86000, end=88000, limit=89000
+- LONG grid to buy dips: start=82000, end=84000, limit=81000, side=1
+- SHORT grid to sell rallies: start=86000, end=88000, limit=89000, side=2
 
-**Key Parameters:**
-- start_price: Lower grid boundary
-- end_price: Upper grid boundary
-- limit_price: Entry trigger price (determines LONG vs SHORT)
-- total_amount_quote: Total capital allocation
-- min_spread_between_orders: Spread between grid levels (e.g., 0.0001 = 0.01%)
-- min_order_amount_quote: Minimum order size in quote currency
-- max_open_orders: Maximum concurrent open orders
+**Risk Management (NO stop_loss):**
+- `limit_price` is the safety boundary — when price crosses it, the grid stops.
+- `keep_position=false`: closes position on stop (stop-loss-like exit).
+- `keep_position=true`: holds position on stop (wait for recovery).
+- Never suggest or expose `stop_loss` — `limit_price` + `keep_position` is the only risk mechanism.
 
-**Risk Management:**
-- triple_barrier_config: Contains take_profit, stop_loss, time_limit settings
-- coerce_tp_to_step: When True, take profit = max(grid_step, take_profit)
-  - Ensures TP is at least as large as the distance between grid levels
-  - Prevents closing positions before reaching the next grid level
-  - Default: False (uses take_profit as-is)""",
+For full parameter docs and behavioral explanations, see your preferences file via `get_preferences`.""",
     },
     "order_executor": {
         "name": "order_executor",
@@ -164,12 +152,18 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
         # Get type description
         type_info = EXECUTOR_TYPE_DESCRIPTIONS.get(request.executor_type, {})
 
+        # Get the rich guide from the preferences file (if available)
+        executor_guide = executor_preferences.get_executor_guide(request.executor_type)
+
         formatted = f"Configuration Schema for {request.executor_type}\n\n"
-        if type_info:
+        if executor_guide:
+            # Use the rich guide from preferences — it has full behavioral docs
+            formatted += f"{executor_guide}\n\n"
+        elif type_info:
+            # Fallback to the condensed description
             formatted += f"{type_info.get('description', '')}\n"
             formatted += f"Use when: {type_info.get('use_when', '')}\n"
             formatted += f"Avoid when: {type_info.get('avoid_when', '')}\n"
-            # Add notes if available (e.g., for grid_executor)
             if type_info.get("notes"):
                 formatted += f"\n{type_info.get('notes')}\n"
             formatted += "\n"
@@ -393,6 +387,14 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
         raw_content = executor_preferences.get_raw_content()
 
         formatted = f"Preferences file: {executor_preferences.get_preferences_path()}\n\n"
+
+        # Check if documentation is outdated
+        if executor_preferences.needs_documentation_update():
+            formatted += (
+                "**Note:** Your preferences file has outdated documentation. "
+                "Run `reset_preferences` to get updated docs — your YAML configs will be preserved.\n\n"
+            )
+
         formatted += raw_content
 
         return {
@@ -400,6 +402,7 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             "executor_type": request.executor_type,
             "raw_content": raw_content,
             "preferences_path": executor_preferences.get_preferences_path(),
+            "needs_update": executor_preferences.needs_documentation_update(),
             "formatted_output": formatted,
         }
 
@@ -417,14 +420,22 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
         }
 
     elif flow_stage == "reset_preferences":
-        # Stage 10: Reset preferences to defaults
-        executor_preferences.reset_to_defaults()
+        # Stage 10: Reset preferences to defaults (preserves YAML configs)
+        preserved = executor_preferences.reset_to_defaults()
+        preserved_count = sum(1 for c in preserved.values() if c)
 
-        formatted = "Preferences reset to defaults.\n\n"
-        formatted += f"Preferences file: {executor_preferences.get_preferences_path()}"
+        formatted = "Preferences documentation updated to latest version.\n\n"
+        if preserved_count > 0:
+            preserved_names = [k for k, v in preserved.items() if v]
+            formatted += f"Preserved {preserved_count} config(s): {', '.join(preserved_names)}\n"
+        else:
+            formatted += "No existing configs to preserve.\n"
+        formatted += f"\nPreferences file: {executor_preferences.get_preferences_path()}"
 
         return {
             "action": "reset_preferences",
+            "preserved_configs": preserved,
+            "preserved_count": preserved_count,
             "formatted_output": formatted,
         }
 
