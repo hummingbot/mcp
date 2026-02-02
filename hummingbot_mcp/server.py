@@ -797,6 +797,14 @@ async def manage_executors(
     The limit_price alone does NOT determine the direction. If side is omitted, it defaults to BUY.
     For SHORT grids (limit_price above the range), always pass side: 2.
 
+    IMPORTANT - Grid Executor Risk Management:
+    The grid executor does NOT use stop_loss. Never suggest or expose stop_loss to the user.
+    Risk management is handled entirely via `limit_price` + `keep_position`:
+    - `limit_price` acts as the safety boundary — when price crosses it, the grid stops.
+    - `keep_position=false`: closes the accumulated position on stop (acts like a stop-loss exit).
+    - `keep_position=true`: holds the accumulated position on stop (wait for recovery).
+    Always guide users to set `limit_price` as their risk boundary and choose `keep_position` accordingly.
+
     Progressive Flow:
     1. No params → List available executor types with descriptions (when to use/avoid)
     2. executor_type only → Show config schema with your saved defaults applied
