@@ -88,6 +88,41 @@ For full parameter docs and behavioral explanations, see your preferences file v
     },
 }
 
+# Internal fields injected by the MCP layer, not user-supplied
+_INTERNAL_FIELDS = {"type", "executor_type", "id"}
+
+
+def validate_executor_config(config: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    """Validate config keys against the backend schema properties.
+
+    Returns a list of error strings. An empty list means the config is valid.
+    """
+    errors: list[str] = []
+    _validate_level(config, schema, "", errors)
+    return errors
+
+
+def _validate_level(config: dict[str, Any], schema: dict[str, Any], path: str, errors: list[str]) -> None:
+    """Recursively validate config keys against schema properties."""
+    properties = schema.get("properties", {})
+    if not properties:
+        return
+
+    allowed = set(properties.keys())
+
+    for key in config:
+        if not path and key in _INTERNAL_FIELDS:
+            continue
+        if key not in allowed:
+            field_list = ", ".join(sorted(allowed - _INTERNAL_FIELDS))
+            location = f" inside '{path}'" if path else ""
+            errors.append(f"Unknown field '{key}'{location}. Allowed fields: {field_list}")
+            continue
+        # Recurse into nested objects
+        prop_schema = properties[key]
+        if isinstance(prop_schema, dict) and isinstance(config[key], dict) and "properties" in prop_schema:
+            _validate_level(config[key], prop_schema, key, errors)
+
 
 async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict[str, Any]:
     """
@@ -189,6 +224,24 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
         # Ensure type is set in config
         if "type" not in merged_config and "executor_type" not in merged_config:
             merged_config["type"] = executor_type
+
+        # Validate config fields against backend schema before sending
+        try:
+            schema = await client.executors.get_executor_config_schema(executor_type)
+            validation_errors = validate_executor_config(merged_config, schema)
+            if validation_errors:
+                error_list = "\n".join(f"  - {e}" for e in validation_errors)
+                return {
+                    "action": "create",
+                    "error": f"Invalid executor configuration:\n{error_list}",
+                    "formatted_output": (
+                        f"Error: Invalid configuration for {executor_type}:\n\n"
+                        f"{error_list}\n\n"
+                        f"Please fix the fields above and try again."
+                    ),
+                }
+        except Exception:
+            pass  # If schema fetch fails, skip validation
 
         account = request.account_name or "master_account"
 
