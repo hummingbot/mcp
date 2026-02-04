@@ -20,74 +20,6 @@ from hummingbot_mcp.schemas import ManageExecutorsRequest
 
 logger = logging.getLogger("hummingbot-mcp")
 
-# Executor type descriptions for helping users choose the right executor
-EXECUTOR_TYPE_DESCRIPTIONS = {
-    "position_executor": {
-        "name": "position_executor",
-        "description": "Takes directional positions with defined entry, stop-loss, and take-profit levels",
-        "use_when": "Clear directional view, want automated SL/TP, defined risk/reward",
-        "avoid_when": "Want to provide liquidity, need multi-leg strategies",
-    },
-    "dca_executor": {
-        "name": "dca_executor",
-        "description": "Dollar-cost averages into positions over time with scheduled purchases",
-        "use_when": "Accumulating gradually, reducing timing risk, building long-term position",
-        "avoid_when": "Need immediate full entry, want quick exits",
-    },
-    "grid_executor": {
-        "name": "grid_executor",
-        "description": "Trades in ranging markets with multiple buy/sell levels in a grid pattern",
-        "use_when": "Range-bound market, profit from volatility, want auto-rebalancing",
-        "avoid_when": "Strongly trending market, limited capital for spread across levels",
-        "notes": """
-**Direction Rules:**
-- LONG grid:  limit_price < start_price < end_price (limit below grid, buys low)
-- SHORT grid: start_price < end_price < limit_price (limit above grid, sells high)
-- side must be explicitly set: 1=BUY (LONG), 2=SELL (SHORT)
-
-**Example (BTC at $85,000):**
-- LONG grid to buy dips: start=82000, end=84000, limit=81000, side=1
-- SHORT grid to sell rallies: start=86000, end=88000, limit=89000, side=2
-
-**Risk Management (NO stop_loss):**
-- `limit_price` is the safety boundary — when price crosses it, the grid stops.
-- `keep_position=false`: closes position on stop (stop-loss-like exit).
-- `keep_position=true`: holds position on stop (wait for recovery).
-- Never suggest or expose `stop_loss` — `limit_price` + `keep_position` is the only risk mechanism.
-
-For full parameter docs and behavioral explanations, see your preferences file via `get_preferences`.""",
-    },
-    "order_executor": {
-        "name": "order_executor",
-        "description": "Simple order execution with retry logic and multiple execution strategies. "
-                       "Closest executor to a plain BUY/SELL order but with strategy options.",
-        "use_when": "Want to place a single buy or sell order with a specific execution strategy "
-                    "(LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER). Best for one-off acquisitions "
-                    "or liquidations with reliable execution.",
-        "avoid_when": "Need complex multi-level strategies (use grid/dca instead), "
-                      "want automated SL/TP management (use position_executor instead)",
-        "notes": """
-**Execution Strategies:**
-- MARKET: Immediate execution at current market price
-- LIMIT: Place a limit order at a specified price
-- LIMIT_MAKER: Post-only limit order (rejected if it would match immediately)
-- LIMIT_CHASER: Continuously chases the best price, refreshing the limit order as the market moves
-
-**LIMIT_CHASER Config (chaser_config):**
-- distance: How far from best price to place the order (e.g., 0.001 = 0.1%)
-- refresh_threshold: How far price must move before refreshing the order (e.g., 0.0005 = 0.05%)
-
-**Key Parameters:**
-- connector_name: Exchange to execute on
-- trading_pair: Trading pair (e.g., 'USDT-BRL')
-- side: 1 (BUY) or 2 (SELL)
-- amount: Order amount (base currency, or '$100' for USD value)
-- execution_strategy: LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER
-- price: Required for LIMIT/LIMIT_MAKER strategies
-- chaser_config: Required for LIMIT_CHASER strategy""",
-    },
-}
-
 # Internal fields injected by the MCP layer, not user-supplied
 _INTERNAL_FIELDS = {"type", "executor_type", "id"}
 
@@ -169,24 +101,12 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
         # Get user defaults
         user_defaults = executor_preferences.get_defaults(request.executor_type)
 
-        # Get type description
-        type_info = EXECUTOR_TYPE_DESCRIPTIONS.get(request.executor_type, {})
-
-        # Get the rich guide from the preferences file (if available)
+        # Get the guide from the markdown file
         executor_guide = executor_preferences.get_executor_guide(request.executor_type)
 
         formatted = f"Configuration Schema for {request.executor_type}\n\n"
         if executor_guide:
-            # Use the rich guide from preferences — it has full behavioral docs
             formatted += f"{executor_guide}\n\n"
-        elif type_info:
-            # Fallback to the condensed description
-            formatted += f"{type_info.get('description', '')}\n"
-            formatted += f"Use when: {type_info.get('use_when', '')}\n"
-            formatted += f"Avoid when: {type_info.get('avoid_when', '')}\n"
-            if type_info.get("notes"):
-                formatted += f"\n{type_info.get('notes')}\n"
-            formatted += "\n"
 
         formatted += format_executor_schema_table(schema, user_defaults)
 
@@ -201,7 +121,6 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             "executor_type": request.executor_type,
             "schema": schema,
             "user_defaults": user_defaults,
-            "type_info": type_info,
             "formatted_output": formatted,
             "next_step": "Call with action='create' and executor_config to create an executor",
             "example": f"manage_executors(action='create', executor_type='{request.executor_type}', executor_config={{...}})",
@@ -425,14 +344,6 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
         raw_content = executor_preferences.get_raw_content()
 
         formatted = f"Preferences file: {executor_preferences.get_preferences_path()}\n\n"
-
-        # Check if documentation is outdated
-        if executor_preferences.needs_documentation_update():
-            formatted += (
-                "**Note:** Your preferences file has outdated documentation. "
-                "Run `reset_preferences` to get updated docs — your YAML configs will be preserved.\n\n"
-            )
-
         formatted += raw_content
 
         return {
@@ -440,7 +351,6 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             "executor_type": request.executor_type,
             "raw_content": raw_content,
             "preferences_path": executor_preferences.get_preferences_path(),
-            "needs_update": executor_preferences.needs_documentation_update(),
             "formatted_output": formatted,
         }
 
