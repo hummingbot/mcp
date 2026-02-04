@@ -38,7 +38,7 @@ build-backend = "setuptools.build_meta"
 packages = ["hummingbot_mcp"]
 
 [tool.setuptools.package-data]
-hummingbot_mcp = ["../scripts/*.sh"]
+hummingbot_mcp = ["../scripts/*.sh", "guides/*.md"]
 
 [tool.ruff]
 line-length = 140
