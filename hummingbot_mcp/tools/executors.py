@@ -175,8 +175,10 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             if request.save_as_default:
                 executor_preferences.update_defaults(executor_type, request.executor_config)
 
+            executor_id = result.get("executor_id") or result.get("id")
+
             formatted = f"Executor created successfully!\n\n"
-            formatted += f"Executor ID: {result.get('id', 'N/A')}\n"
+            formatted += f"Executor ID: {executor_id or 'N/A'}\n"
             formatted += f"Type: {executor_type}\n"
             formatted += f"Account: {account}\n"
 
@@ -185,7 +187,7 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
 
             return {
                 "action": "create",
-                "executor_id": result.get("id"),
+                "executor_id": executor_id,
                 "executor_type": executor_type,
                 "account": account,
                 "config_used": merged_config,
