@@ -76,7 +76,8 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             "- **position_executor** — Directional trading with entry, stop-loss, and take-profit\n"
             "- **dca_executor** — Dollar-cost averaging for gradual position building\n"
             "- **grid_executor** — Grid trading across multiple price levels in ranging markets\n"
-            "- **order_executor** — Simple BUY/SELL order with execution strategy\n\n"
+            "- **order_executor** — Simple BUY/SELL order with execution strategy\n"
+            "- **lp_executor** — Liquidity provision on CLMM DEXs (Meteora, Raydium)\n\n"
             "Provide `executor_type` to see the configuration schema."
         )
 
@@ -174,8 +175,10 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             if request.save_as_default:
                 executor_preferences.update_defaults(executor_type, request.executor_config)
 
+            executor_id = result.get("executor_id") or result.get("id")
+
             formatted = f"Executor created successfully!\n\n"
-            formatted += f"Executor ID: {result.get('id', 'N/A')}\n"
+            formatted += f"Executor ID: {executor_id or 'N/A'}\n"
             formatted += f"Type: {executor_type}\n"
             formatted += f"Account: {account}\n"
 
@@ -184,7 +187,7 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
 
             return {
                 "action": "create",
-                "executor_id": result.get("id"),
+                "executor_id": executor_id,
                 "executor_type": executor_type,
                 "account": account,
                 "config_used": merged_config,

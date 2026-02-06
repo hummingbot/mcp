@@ -250,6 +250,7 @@ async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMRequest
                 "connector": request.connector,
                 "network": request.network,
                 "pool_address": request.pool_address,
+                "wallet_address": request.wallet_address or "(default)",
                 "price_range": {
                     "lower_price": request.lower_price,
                     "upper_price": request.upper_price
@@ -281,6 +282,7 @@ async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMRequest
                 "connector": request.connector,
                 "network": request.network,
                 "position_address": request.position_address,
+                "wallet_address": request.wallet_address or "(default)",
                 "result": result
             }
 
@@ -308,6 +310,7 @@ async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMRequest
                 "connector": request.connector,
                 "network": request.network,
                 "position_address": request.position_address,
+                "wallet_address": request.wallet_address or "(default)",
                 "result": result
             }
 
@@ -335,6 +338,7 @@ async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMRequest
                 "connector": request.connector,
                 "network": request.network,
                 "pool_address": request.pool_address,
+                "wallet_address": request.wallet_address or "(default)",
                 "result": result
             }
 

@@ -958,10 +958,16 @@ async def manage_gateway_config(
     Resource Types:
     - chains: Get all blockchain chains
     - networks: List/get/update network configurations (format: 'chain-network')
+      - GET returns merged chain + network config including: defaultWallet, defaultNetwork, rpcProvider, nodeURL, chainID, etc.
+      - UPDATE can modify both network-level fields (nodeURL, chainID) and chain-level fields (defaultWallet, defaultNetwork)
     - tokens: List/add/delete tokens per network
     - connectors: List/get/update DEX connector configurations
     - pools: List/add liquidity pools per connector/network
     - wallets: Add/delete wallets for blockchain chains
+
+    Examples:
+    - Get network config with defaultWallet: resource_type="networks", action="get", network_id="solana-mainnet-beta"
+    - Set default wallet: resource_type="networks", action="update", network_id="solana-mainnet-beta", config_updates={"defaultWallet": "wallet_address"}
 
     Args:
         resource_type: Type of resource to manage
