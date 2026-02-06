@@ -28,7 +28,8 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 #### Key Parameters
 
 **Required:**
-- `connector_name`: CLMM connector (e.g., `meteora`, `raydiumclmm`)
+- `connector_name`: CLMM connector in `connector/clmm` format (e.g., `meteora/clmm`, `raydiumclmm/clmm`)
+  - **IMPORTANT:** Must include the `/clmm` suffix — using just `meteora` will fail
 - `trading_pair`: Token pair (e.g., `SOL-USDC`)
 - `pool_address`: Pool contract address
 - `lower_price` / `upper_price`: Price range bounds
@@ -47,3 +48,11 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 - `0`: **Spot** — Uniform liquidity across range
 - `1`: **Curve** — Concentrated around current price
 - `2`: **Bid-Ask** — Liquidity at range edges
+
+#### Important: Managing Positions
+
+**Always use the executor tool (`manage_executors`) to open and close LP positions — NOT the gateway CLMM tool directly.**
+
+- Opening/closing via `manage_gateway_clmm` bypasses the executor state machine and leaves the database out of sync
+- Use `manage_executors` with `action="stop"` to properly close positions and update executor status
+- If a position is closed externally (via gateway or UI), manually mark the executor as `TERMINATED` in the database
