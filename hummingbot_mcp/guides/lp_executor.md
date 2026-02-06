@@ -72,3 +72,8 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 - Opening/closing via `manage_gateway_clmm` bypasses the executor state machine and leaves the database out of sync
 - Use `manage_executors` with `action="stop"` to properly close positions and update executor status
 - If a position is closed externally (via gateway or UI), manually mark the executor as `TERMINATED` in the database
+
+**Verifying position status:**
+- If uncertain about position status, use `manage_gateway_clmm` with `action="get_positions"` to check on-chain state
+- Compare on-chain positions with executor `custom_info.position_address`
+- If position is closed on-chain but executor still shows `RUNNING`, manually update executor status in database to `TERMINATED`
