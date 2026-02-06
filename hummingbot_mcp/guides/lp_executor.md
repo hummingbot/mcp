@@ -78,3 +78,8 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 - Compare on-chain positions with executor `custom_info.position_address`
 - If position is closed on-chain but executor still shows `RUNNING`, manually update executor status in database to `TERMINATED`
 - If position is open on-chain but executor still shows `OPENING`, the executor should eventually sync — if stuck, check API logs for errors
+
+**Exception: Executor not found in API (404 error):**
+- If API was restarted, executors may no longer exist in memory but positions remain on-chain
+- In this case, use `manage_gateway_clmm` with `action="close_position"` to close the on-chain position directly
+- Then manually update the executor status in the database to `TERMINATED`
