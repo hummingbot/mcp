@@ -7,6 +7,50 @@ configurations, including exploration, modification, and bot deployment.
 from typing import Any, Literal
 
 
+async def manage_controllers(
+    client: Any,
+    action: Literal["list", "describe", "upsert", "delete"],
+    target: Literal["controller", "config"] | None = None,
+    controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
+    controller_name: str | None = None,
+    controller_code: str | None = None,
+    config_name: str | None = None,
+    config_data: dict[str, Any] | None = None,
+    bot_name: str | None = None,
+    confirm_override: bool = False,
+) -> dict[str, Any]:
+    """
+    Unified controller management: list, describe, upsert, delete.
+
+    Routes to explore_controllers for list/describe and modify_controllers for upsert/delete.
+    """
+    if action in ("list", "describe"):
+        return await explore_controllers(
+            client=client,
+            action=action,
+            controller_type=controller_type,
+            controller_name=controller_name,
+            config_name=config_name,
+        )
+    elif action in ("upsert", "delete"):
+        if not target:
+            raise ValueError("'target' parameter ('controller' or 'config') is required for upsert/delete actions")
+        return await modify_controllers(
+            client=client,
+            action=action,
+            target=target,
+            controller_type=controller_type,
+            controller_name=controller_name,
+            controller_code=controller_code,
+            config_name=config_name,
+            config_data=config_data,
+            bot_name=bot_name,
+            confirm_override=confirm_override,
+        )
+    else:
+        raise ValueError(f"Invalid action '{action}'. Use 'list', 'describe', 'upsert', or 'delete'.")
+
+
 async def explore_controllers(
     client: Any,
     action: Literal["list", "describe"],

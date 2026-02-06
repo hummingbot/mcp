@@ -26,6 +26,7 @@ async def get_portfolio_overview(
     include_perp_positions: bool = True,
     include_lp_positions: bool = True,
     include_active_orders: bool = True,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     """
     Get a unified portfolio overview with real-time data for all active positions.
@@ -65,7 +66,8 @@ async def get_portfolio_overview(
                 try:
                     return await client.portfolio.get_state(
                         account_names=account_names,
-                        connector_names=connector_names
+                        connector_names=connector_names,
+                        refresh=refresh,
                     )
                 except Exception as e:
                     logger.warning(f"Failed to get balances: {str(e)}")

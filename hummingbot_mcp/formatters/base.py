@@ -3,8 +3,10 @@ Base formatting utilities shared across all formatters.
 
 This module provides common formatting functions for numbers, timestamps,
 percentages, and currency values used throughout the application.
+It also includes field accessor utilities for safely extracting values
+from dictionaries with fallback support.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -70,10 +72,13 @@ def format_timestamp(ts: Any, format_str: str = "%m/%d %H:%M") -> str:
         if isinstance(ts, (int, float)):
             # Handle both seconds and milliseconds timestamps
             timestamp = ts / 1000 if ts > 1e12 else ts
-            dt = datetime.fromtimestamp(timestamp)
+            dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         else:
             # Try parsing ISO format string
             dt = datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+            # Convert to UTC if timezone-aware
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc)
 
         return dt.strftime(format_str)
     except (ValueError, OSError, OverflowError):
@@ -221,3 +226,179 @@ def format_table_separator(length: int = 120, char: str = "-") -> str:
         Separator string
     """
     return char * length
+
+
+# ==============================================================================
+# Field Accessor Utilities
+# ==============================================================================
+
+
+def get_field(item: dict[str, Any], *keys: str, default: Any = "N/A") -> Any:
+    """
+    Get a field value from a dictionary with fallback keys.
+
+    Tries each key in order and returns the first non-None value found.
+    If no keys match, returns the default value.
+
+    Args:
+        item: Dictionary to extract value from
+        *keys: One or more keys to try in order
+        default: Default value if no key is found (default: "N/A")
+
+    Returns:
+        The extracted value or the default
+
+    Examples:
+        >>> data = {"created_at": 1234567890, "name": "test"}
+        >>> get_field(data, "timestamp", "created_at")  # Returns 1234567890
+        >>> get_field(data, "missing_key", default=0)  # Returns 0
+    """
+    for key in keys:
+        if key in item and item[key] is not None:
+            return item[key]
+    return default
+
+
+def get_timestamp_field(item: dict[str, Any], *keys: str) -> str:
+    """
+    Get and format a timestamp field with common fallback keys.
+
+    If no keys are provided, tries common timestamp field names:
+    timestamp, created_at, creation_timestamp, time
+
+    Args:
+        item: Dictionary to extract timestamp from
+        *keys: Optional specific keys to try first
+
+    Returns:
+        Formatted timestamp string or "N/A"
+
+    Examples:
+        >>> data = {"created_at": 1234567890}
+        >>> get_timestamp_field(data)  # Returns formatted timestamp
+        >>> get_timestamp_field(data, "my_time", "created_at")  # Tries custom keys first
+    """
+    default_keys = ("timestamp", "created_at", "creation_timestamp", "time")
+    all_keys = keys + default_keys if keys else default_keys
+
+    ts = get_field(item, *all_keys, default=0)
+    return format_timestamp(ts)
+
+
+def get_truncated(
+    item: dict[str, Any],
+    key: str,
+    max_len: int,
+    default: str = "N/A"
+) -> str:
+    """
+    Get a string field and truncate it to a maximum length.
+
+    Args:
+        item: Dictionary to extract value from
+        key: Key to extract
+        max_len: Maximum length for the result
+        default: Default value if key is not found (default: "N/A")
+
+    Returns:
+        Truncated string value
+
+    Examples:
+        >>> data = {"description": "This is a very long description"}
+        >>> get_truncated(data, "description", 10)  # Returns "This is..."
+    """
+    value = item.get(key)
+    if value is None:
+        return default[:max_len] if len(default) > max_len else default
+
+    value_str = str(value)
+    return truncate_string(value_str, max_len)
+
+
+def get_formatted_number(
+    item: dict[str, Any],
+    *keys: str,
+    decimals: int = 2,
+    compact: bool = True,
+    default: str = "N/A"
+) -> str:
+    """
+    Get a numeric field and format it.
+
+    Args:
+        item: Dictionary to extract value from
+        *keys: One or more keys to try in order
+        decimals: Number of decimal places (default: 2)
+        compact: Use K/M notation for large numbers (default: True)
+        default: Default value if no key is found (default: "N/A")
+
+    Returns:
+        Formatted number string
+
+    Examples:
+        >>> data = {"amount": 1500.5, "volume": None}
+        >>> get_formatted_number(data, "amount", decimals=2)  # Returns "1.50K"
+        >>> get_formatted_number(data, "volume", "amount")  # Returns "1.50K"
+    """
+    value = get_field(item, *keys, default=None)
+    if value is None:
+        return default
+    return format_number(value, decimals=decimals, compact=compact)
+
+
+def get_formatted_currency(
+    item: dict[str, Any],
+    *keys: str,
+    symbol: str = "$",
+    decimals: int = 2,
+    default: str = "N/A"
+) -> str:
+    """
+    Get a numeric field and format it as currency.
+
+    Args:
+        item: Dictionary to extract value from
+        *keys: One or more keys to try in order
+        symbol: Currency symbol (default: "$")
+        decimals: Number of decimal places (default: 2)
+        default: Default value if no key is found (default: "N/A")
+
+    Returns:
+        Formatted currency string
+
+    Examples:
+        >>> data = {"price": 1234.56}
+        >>> get_formatted_currency(data, "price")  # Returns "$1,234.56"
+    """
+    value = get_field(item, *keys, default=None)
+    if value is None:
+        return default
+    return format_currency(value, symbol=symbol, decimals=decimals)
+
+
+def get_formatted_percentage(
+    item: dict[str, Any],
+    *keys: str,
+    decimals: int = 2,
+    default: str = "N/A"
+) -> str:
+    """
+    Get a decimal field and format it as percentage.
+
+    Args:
+        item: Dictionary to extract value from
+        *keys: One or more keys to try in order
+        decimals: Number of decimal places (default: 2)
+        default: Default value if no key is found (default: "N/A")
+
+    Returns:
+        Formatted percentage string
+
+    Examples:
+        >>> data = {"change_pct": 0.05}
+        >>> get_formatted_percentage(data, "change_pct")  # Returns "5.00%"
+    """
+    value = get_field(item, *keys, default=None)
+    if value is None:
+        return default
+    return format_percentage(value, decimals=decimals)

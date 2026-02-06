@@ -6,7 +6,13 @@ prices, OHLCV candles, and order book snapshots.
 """
 from typing import Any
 
-from .base import format_currency, format_number, format_timestamp, format_table_separator
+from .base import (
+    format_currency,
+    format_number,
+    format_table_separator,
+    format_timestamp,
+    get_field,
+)
 
 
 def format_prices_as_table(prices_data: dict[str, Any]) -> str:
@@ -38,9 +44,7 @@ def format_prices_as_table(prices_data: dict[str, Any]) -> str:
         row = f"{pair_str}  | {price_str}"
         rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
 def format_candles_as_table(candles: list[dict[str, Any]]) -> str:
@@ -58,25 +62,16 @@ def format_candles_as_table(candles: list[dict[str, Any]]) -> str:
     if not candles:
         return "No candles found."
 
-    def format_price(price: Any) -> str:
+    def format_price(value: Any) -> str:
         """Format price value"""
         try:
-            return f"{float(price):.2f}"
+            return f"{float(value):.2f}"
         except (ValueError, TypeError):
             return "N/A"
 
-    def format_volume(vol: Any) -> str:
+    def format_volume(value: Any) -> str:
         """Format volume compactly"""
-        try:
-            vol_float = float(vol)
-            if vol_float >= 1_000_000:
-                return f"{vol_float/1_000_000:.2f}M"
-            elif vol_float >= 1_000:
-                return f"{vol_float/1_000:.2f}K"
-            else:
-                return f"{vol_float:.2f}"
-        except (ValueError, TypeError):
-            return "N/A"
+        return format_number(value, decimals=2, compact=True)
 
     # Header
     header = "time        | open     | high     | low      | close    | volume"
@@ -85,19 +80,17 @@ def format_candles_as_table(candles: list[dict[str, Any]]) -> str:
     # Format each candle as a row
     rows = []
     for candle in candles:
-        time_str = format_timestamp(candle.get("timestamp", 0))
-        open_price = format_price(candle.get("open"))
-        high_price = format_price(candle.get("high"))
-        low_price = format_price(candle.get("low"))
-        close_price = format_price(candle.get("close"))
-        volume = format_volume(candle.get("volume"))
+        time_str = format_timestamp(get_field(candle, "timestamp", default=0))
+        open_price = format_price(get_field(candle, "open", default=None))
+        high_price = format_price(get_field(candle, "high", default=None))
+        low_price = format_price(get_field(candle, "low", default=None))
+        close_price = format_price(get_field(candle, "close", default=None))
+        volume = format_volume(get_field(candle, "volume", default=None))
 
         row = f"{time_str:11} | {open_price:8} | {high_price:8} | {low_price:8} | {close_price:8} | {volume}"
         rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
 def format_order_book_as_table(order_book_data: dict[str, Any]) -> str:
@@ -135,6 +128,4 @@ def format_order_book_as_table(order_book_data: dict[str, Any]) -> str:
         row = f"{bid_price} | {bid_amount} |  {ask_price} | {ask_amount}"
         rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{sub_header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{sub_header}\n{separator}\n" + "\n".join(rows)

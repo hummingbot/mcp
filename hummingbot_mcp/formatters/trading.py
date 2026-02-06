@@ -6,7 +6,8 @@ orders and positions.
 """
 from typing import Any
 
-from .base import format_number, format_timestamp, format_table_separator
+from .base import format_number, get_field, get_timestamp_field
+from .table_builder import ColumnDef, TableBuilder
 
 
 def format_orders_as_table(orders: list[dict[str, Any]]) -> str:
@@ -24,32 +25,63 @@ def format_orders_as_table(orders: list[dict[str, Any]]) -> str:
     if not orders:
         return "No orders found."
 
-    # Header
-    header = "time        | pair          | side | type   | amount   | price    | filled   | status"
-    separator = format_table_separator()
+    def format_time(item: dict) -> str:
+        return get_timestamp_field(item, "created_at", "creation_timestamp", "timestamp")
 
-    # Format each order as a row
+    def format_pair(item: dict) -> str:
+        return str(get_field(item, "trading_pair", default="N/A"))[:12]
+
+    def format_side(item: dict) -> str:
+        return str(get_field(item, "trade_type", "side", default="N/A"))[:4]
+
+    def format_type(item: dict) -> str:
+        return str(get_field(item, "order_type", "type", default="N/A"))[:6]
+
+    def format_amount(item: dict) -> str:
+        return format_number(get_field(item, "amount", "order_size", default=None), compact=False)
+
+    def format_price(item: dict) -> str:
+        return format_number(get_field(item, "price", default=None), compact=False)
+
+    def format_filled(item: dict) -> str:
+        return format_number(get_field(item, "filled_amount", "executed_amount_base", default=None), compact=False)
+
+    def format_status(item: dict) -> str:
+        return str(get_field(item, "status", default="N/A"))[:8]
+
+    columns = [
+        ColumnDef(name="time", key="__time", width=11, formatter=lambda _: ""),
+        ColumnDef(name="pair", key="__pair", width=13, formatter=lambda _: ""),
+        ColumnDef(name="side", key="__side", width=4, formatter=lambda _: ""),
+        ColumnDef(name="type", key="__type", width=6, formatter=lambda _: ""),
+        ColumnDef(name="amount", key="__amount", width=8, formatter=lambda _: ""),
+        ColumnDef(name="price", key="__price", width=8, formatter=lambda _: ""),
+        ColumnDef(name="filled", key="__filled", width=8, formatter=lambda _: ""),
+        ColumnDef(name="status", key="__status", width=8, formatter=lambda _: ""),
+    ]
+
+    builder = TableBuilder(columns, empty_message="No orders found.")
+
+    # Build header
+    header = "time        | pair          | side | type   | amount   | price    | filled   | status"
+    separator = "-" * 120
+
+    # Format rows manually for better control
     rows = []
     for order in orders:
-        time_str = format_timestamp(
-            order.get("created_at") or order.get("creation_timestamp") or order.get("timestamp", 0)
+        row = (
+            f"{format_time(order):11} | "
+            f"{format_pair(order):13} | "
+            f"{format_side(order):4} | "
+            f"{format_type(order):6} | "
+            f"{format_amount(order):8} | "
+            f"{format_price(order):8} | "
+            f"{format_filled(order):8} | "
+            f"{format_status(order)}"
         )
-        pair = (order.get("trading_pair") or "N/A")[:12]
-        side = (order.get("trade_type") or order.get("side") or "N/A")[:4]
-        order_type = (order.get("order_type") or order.get("type") or "N/A")[:6]
-        amount = format_number(order.get("amount") or order.get("order_size"), compact=False)
-        price = format_number(order.get("price"), compact=False)
-        filled = format_number(
-            order.get("filled_amount") or order.get("executed_amount_base"), compact=False
-        )
-        status = (order.get("status") or "N/A")[:8]
-
-        row = f"{time_str:11} | {pair:13} | {side:4} | {order_type:6} | {amount:8} | {price:8} | {filled:8} | {status}"
         rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
 def format_positions_as_table(positions: list[dict[str, Any]]) -> str:
@@ -67,28 +99,43 @@ def format_positions_as_table(positions: list[dict[str, Any]]) -> str:
     if not positions:
         return "No positions found."
 
-    # Header
-    header = "pair          | side  | amount   | entry_price | current_price | unrealized_pnl | leverage"
-    separator = format_table_separator()
+    def format_pair(item: dict) -> str:
+        return str(get_field(item, "trading_pair", default="N/A"))[:12]
 
-    # Format each position as a row
+    def format_side(item: dict) -> str:
+        return str(get_field(item, "position_side", "side", default="N/A"))[:5]
+
+    def format_amount(item: dict) -> str:
+        return format_number(get_field(item, "amount", "position_size", default=None), compact=False)
+
+    def format_entry(item: dict) -> str:
+        return format_number(get_field(item, "entry_price", default=None), compact=False)
+
+    def format_current(item: dict) -> str:
+        return format_number(get_field(item, "current_price", "mark_price", default=None), compact=False)
+
+    def format_pnl(item: dict) -> str:
+        return format_number(get_field(item, "unrealized_pnl", default=None), compact=False)
+
+    def format_leverage(item: dict) -> str:
+        return str(get_field(item, "leverage", default="N/A"))
+
+    # Build header
+    header = "pair          | side  | amount   | entry_price | current_price | unrealized_pnl | leverage"
+    separator = "-" * 120
+
+    # Format rows
     rows = []
     for position in positions:
-        pair = (position.get("trading_pair") or "N/A")[:12]
-        side = (position.get("position_side") or position.get("side") or "N/A")[:5]
-        amount = format_number(
-            position.get("amount") or position.get("position_size"), compact=False
+        row = (
+            f"{format_pair(position):13} | "
+            f"{format_side(position):5} | "
+            f"{format_amount(position):8} | "
+            f"{format_entry(position):11} | "
+            f"{format_current(position):13} | "
+            f"{format_pnl(position):14} | "
+            f"{format_leverage(position)}"
         )
-        entry_price = format_number(position.get("entry_price"), compact=False)
-        current_price = format_number(
-            position.get("current_price") or position.get("mark_price"), compact=False
-        )
-        unrealized_pnl = format_number(position.get("unrealized_pnl"), compact=False)
-        leverage = position.get("leverage") or "N/A"
-
-        row = f"{pair:13} | {side:5} | {amount:8} | {entry_price:11} | {current_price:13} | {unrealized_pnl:14} | {leverage}"
         rows.append(row)
 
-    # Combine everything
-    table = f"{header}\n{separator}\n" + "\n".join(rows)
-    return table
+    return f"{header}\n{separator}\n" + "\n".join(rows)

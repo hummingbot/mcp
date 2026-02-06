@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "hummingbot-api-client==1.2.0",
+    "hummingbot-api-client==1.2.8",
     "mcp[cli]>=1.6.0",
     "pydantic>=2.11.2",
     "python-dotenv>=1.0.0",
@@ -38,7 +38,7 @@ build-backend = "setuptools.build_meta"
 packages = ["hummingbot_mcp"]
 
 [tool.setuptools.package-data]
-hummingbot_mcp = ["../scripts/*.sh"]
+hummingbot_mcp = ["../scripts/*.sh", "guides/*.md"]
 
 [tool.ruff]
 line-length = 140
