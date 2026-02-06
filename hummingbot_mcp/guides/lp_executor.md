@@ -39,6 +39,22 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 - `quote_amount`: Amount of quote token to provide
 - `side`: Position side (0=BOTH, 1=BUY/quote-only, 2=SELL/base-only)
 
+#### Single-Sided vs Double-Sided Positions
+
+**Single-sided (one asset only):**
+- **Base token only** (e.g., 0.2 SOL): Creates a SELL position (`side=2`) with range ABOVE current price
+  - Position starts out-of-range, enters range when price rises
+  - SOL converts to USDC as price moves up through the range
+- **Quote token only** (e.g., 50 USDC): Creates a BUY position (`side=1`) with range BELOW current price
+  - Position starts out-of-range, enters range when price falls
+  - USDC converts to SOL as price moves down through the range
+
+**Double-sided (both assets):**
+- When user specifies both `base_amount` and `quote_amount`, ask:
+  1. **Centered range** around current price? (±50% of position width above/below current price)
+  2. **Custom range**? (user specifies exact lower/upper bounds)
+- Set `side=0` (BOTH) for double-sided positions
+
 **Position Management:**
 - `keep_position=false` (default): Close LP position when executor stops
 - `keep_position=true`: Leave position open on-chain, stop monitoring only
