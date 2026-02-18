@@ -147,16 +147,17 @@ class ManageExecutorsRequest(BaseModel):
     1. No params -> List available executor types with descriptions
     2. executor_type only -> Show config schema with user defaults applied
     3. action="create" + executor_config -> Create executor (merged with defaults)
-    4. action="search" -> Search/list executors with filters
-    5. action="get" + executor_id -> Get specific executor details
-    6. action="stop" + executor_id -> Stop executor
-    7. action="get_summary" -> Get overall executor summary
-    8. action="get_preferences" -> View saved preferences (optionally for specific executor_type)
-    9. action="save_preferences" + preferences_content -> Save full preferences file content
-    10. action="reset_preferences" -> Reset preferences to defaults
+    4. action="search" -> Search/list executors (or get detail if executor_id provided)
+    5. action="stop" + executor_id -> Stop executor
+    6. action="get_logs" + executor_id -> Get executor logs
+    7. action="get_preferences" -> View saved preferences
+    8. action="save_preferences" + preferences_content -> Save preferences file
+    9. action="reset_preferences" -> Reset preferences to defaults
+    10. action="positions_summary" -> Get positions (or specific if connector_name+trading_pair given)
+    11. action="clear_position" + connector_name + trading_pair -> Clear position
     """
 
-    action: Literal["create", "search", "get", "stop", "get_summary", "get_preferences", "save_preferences", "reset_preferences", "positions_summary", "get_position", "clear_position"] | None = Field(
+    action: Literal["create", "search", "stop", "get_logs", "get_preferences", "save_preferences", "reset_preferences", "positions_summary", "clear_position"] | None = Field(
         default=None,
         description="Action to perform. Leave empty to see executor types or show schema.",
     )
@@ -174,6 +175,12 @@ class ManageExecutorsRequest(BaseModel):
     executor_id: str | None = Field(
         default=None,
         description="Executor ID for 'get' or 'stop' actions.",
+    )
+
+    # Log options
+    log_level: str | None = Field(
+        default=None,
+        description="Filter logs by level (ERROR, WARNING, INFO, DEBUG). Only for 'get_logs' action.",
     )
 
     # Search filters
@@ -258,9 +265,7 @@ class ManageExecutorsRequest(BaseModel):
 
     def get_flow_stage(self) -> str:
         """Determine which stage of the flow we're in."""
-        if self.action == "get_summary":
-            return "get_summary"
-        elif self.action == "get_preferences":
+        if self.action == "get_preferences":
             return "get_preferences"
         elif self.action == "save_preferences" and self.preferences_content:
             return "save_preferences"
@@ -268,16 +273,14 @@ class ManageExecutorsRequest(BaseModel):
             return "reset_preferences"
         elif self.action == "search":
             return "search"
-        elif self.action == "get" and self.executor_id:
-            return "get"
         elif self.action == "stop" and self.executor_id:
             return "stop"
+        elif self.action == "get_logs" and self.executor_id:
+            return "get_logs"
         elif self.action == "create" and self.executor_config:
             return "create"
         elif self.action == "positions_summary":
             return "positions_summary"
-        elif self.action == "get_position" and self.connector_name and self.trading_pair:
-            return "get_position"
         elif self.action == "clear_position" and self.connector_name and self.trading_pair:
             return "clear_position"
         elif self.executor_type is not None:
