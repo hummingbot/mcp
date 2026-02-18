@@ -11,7 +11,6 @@ from hummingbot_mcp.executor_preferences import executor_preferences
 from hummingbot_mcp.formatters.executors import (
     format_executor_detail,
     format_executor_schema_table,
-    format_executor_summary,
     format_executors_table,
     format_positions_held_table,
     format_positions_summary,
@@ -201,8 +200,19 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             }
 
     elif flow_stage == "search":
-        # Stage 4: Search executors
+        # Search executors, or get detail for a specific executor_id
         try:
+            if request.executor_id:
+                # Get specific executor detail
+                result = await client.executors.get_executor(request.executor_id)
+                formatted = format_executor_detail(result)
+                return {
+                    "action": "search",
+                    "executor_id": request.executor_id,
+                    "executor": result,
+                    "formatted_output": formatted,
+                }
+
             result = await client.executors.search_executors(
                 account_names=request.account_names,
                 connector_names=request.connector_names,
@@ -239,27 +249,6 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
                 "formatted_output": f"Error searching executors: {e}",
             }
 
-    elif flow_stage == "get":
-        # Stage 5: Get specific executor
-        try:
-            result = await client.executors.get_executor(request.executor_id)
-
-            formatted = format_executor_detail(result)
-
-            return {
-                "action": "get",
-                "executor_id": request.executor_id,
-                "executor": result,
-                "formatted_output": formatted,
-            }
-
-        except Exception as e:
-            return {
-                "action": "get",
-                "error": str(e),
-                "formatted_output": f"Error getting executor {request.executor_id}: {e}",
-            }
-
     elif flow_stage == "stop":
         # Stage 6: Stop executor
         try:
@@ -287,56 +276,54 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
                 "formatted_output": f"Error stopping executor {request.executor_id}: {e}",
             }
 
-    elif flow_stage == "get_summary":
-        # Stage 7: Get overall summary with positions and recent executors
+    elif flow_stage == "get_logs":
+        # Get executor logs via direct API call (not yet in client library)
         try:
-            result = await client.executors.get_summary()
+            params = {"limit": request.limit}
+            if request.log_level:
+                params["level"] = request.log_level.upper()
 
-            formatted = format_executor_summary(result)
+            resp = await client.executors.session.get(
+                f"{client.executors.base_url}/executors/{request.executor_id}/logs",
+                params=params,
+            )
+            resp.raise_for_status()
+            result = await resp.json()
 
-            # Fetch positions held
-            positions = []
-            try:
-                positions_result = await client.executors.get_positions_summary()
-                positions = positions_result.get("positions", positions_result) if isinstance(positions_result, dict) else positions_result
-                if not isinstance(positions, list):
-                    positions = [positions] if positions else []
+            logs = result.get("logs", [])
+            total = result.get("total_count", len(logs))
 
-                if positions:
-                    formatted += "\n\nPositions Held:\n"
-                    formatted += format_positions_held_table(positions)
-            except Exception:
-                # If fetching positions fails, continue without them
-                pass
+            formatted = f"Executor Logs: {request.executor_id}\n"
+            formatted += f"Total entries: {total}"
+            if request.log_level:
+                formatted += f" (filtered: {request.log_level.upper()})"
+            formatted += f", showing: {len(logs)}\n\n"
 
-            # Also fetch last 10 executors to show recent activity
-            recent_executors = []
-            try:
-                recent_result = await client.executors.search_executors(limit=10)
-                recent_executors = recent_result.get("data", recent_result) if isinstance(recent_result, dict) else recent_result
-                if not isinstance(recent_executors, list):
-                    recent_executors = [recent_executors] if recent_executors else []
-
-                if recent_executors:
-                    formatted += "\n\nRecent Executors (last 10):\n"
-                    formatted += format_executors_table(recent_executors)
-            except Exception:
-                # If fetching recent executors fails, just show the summary
-                pass
+            if not logs:
+                formatted += "No log entries found. Note: logs are only available for active executors and are cleared on completion."
+            else:
+                for entry in logs:
+                    ts = entry.get("timestamp", "")
+                    level = entry.get("level", "")
+                    msg = entry.get("message", "")
+                    formatted += f"[{ts}] {level}: {msg}\n"
+                    exc = entry.get("exc_info")
+                    if exc:
+                        formatted += f"  Exception: {exc}\n"
 
             return {
-                "action": "get_summary",
-                "summary": result,
-                "positions": positions,
-                "recent_executors": recent_executors,
+                "action": "get_logs",
+                "executor_id": request.executor_id,
+                "logs": logs,
+                "total_count": total,
                 "formatted_output": formatted,
             }
 
         except Exception as e:
             return {
-                "action": "get_summary",
+                "action": "get_logs",
                 "error": str(e),
-                "formatted_output": f"Error getting executor summary: {e}",
+                "formatted_output": f"Error getting logs for executor {request.executor_id}: {e}",
             }
 
     elif flow_stage == "get_preferences":
@@ -390,8 +377,37 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
     # Position management stages (merged from manage_executor_positions)
 
     elif flow_stage == "positions_summary":
-        # Get positions summary (aggregated view)
+        # Get all positions, or specific position if connector_name + trading_pair given
         try:
+            if request.connector_name and request.trading_pair:
+                # Get specific position detail
+                account = request.account_name or "master_account"
+                result = await client.executors.get_position_held(
+                    connector_name=request.connector_name,
+                    trading_pair=request.trading_pair,
+                    account_name=account,
+                )
+
+                formatted = f"Position Details\n\n"
+                formatted += f"Connector: {request.connector_name}\n"
+                formatted += f"Trading Pair: {request.trading_pair}\n"
+                formatted += f"Account: {account}\n\n"
+
+                if result:
+                    positions = [result] if not isinstance(result, list) else result
+                    formatted += format_positions_held_table(positions)
+                else:
+                    formatted += "No position found for this connector/pair combination."
+
+                return {
+                    "action": "positions_summary",
+                    "connector_name": request.connector_name,
+                    "trading_pair": request.trading_pair,
+                    "account": account,
+                    "position": result,
+                    "formatted_output": formatted,
+                }
+
             result = await client.executors.get_positions_summary()
 
             positions = result.get("positions", result) if isinstance(result, dict) else result
@@ -413,52 +429,13 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
                 "positions": positions,
                 "summary": result if isinstance(result, dict) else {"positions": positions},
                 "formatted_output": formatted,
-                "next_step": "Call with action='get_position', connector_name and trading_pair to see specific position details",
             }
 
         except Exception as e:
             return {
                 "action": "positions_summary",
                 "error": str(e),
-                "formatted_output": f"Error getting positions summary: {e}",
-            }
-
-    elif flow_stage == "get_position":
-        # Get specific position details
-        account = request.account_name or "master_account"
-        try:
-            result = await client.executors.get_position_held(
-                connector_name=request.connector_name,
-                trading_pair=request.trading_pair,
-                account_name=account,
-            )
-
-            formatted = f"Position Details\n\n"
-            formatted += f"Connector: {request.connector_name}\n"
-            formatted += f"Trading Pair: {request.trading_pair}\n"
-            formatted += f"Account: {account}\n\n"
-
-            if result:
-                positions = [result] if not isinstance(result, list) else result
-                formatted += format_positions_held_table(positions)
-            else:
-                formatted += "No position found for this connector/pair combination."
-
-            return {
-                "action": "get_position",
-                "connector_name": request.connector_name,
-                "trading_pair": request.trading_pair,
-                "account": account,
-                "position": result,
-                "formatted_output": formatted,
-                "next_step": "Use action='clear_position' if you need to clear this position",
-            }
-
-        except Exception as e:
-            return {
-                "action": "get_position",
-                "error": str(e),
-                "formatted_output": f"Error getting position: {e}",
+                "formatted_output": f"Error getting positions: {e}",
             }
 
     elif flow_stage == "clear_position":

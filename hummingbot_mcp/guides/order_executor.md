@@ -29,3 +29,6 @@ Closest executor to a plain BUY/SELL order but with strategy options.
 - `execution_strategy`: LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER
 - `price`: Required for LIMIT/LIMIT_MAKER strategies
 - `chaser_config`: Required for LIMIT_CHASER strategy
+- `leverage`: Leverage multiplier (default: 1)
+- `position_action`: 'OPEN' or 'CLOSE' (default: 'OPEN', useful for perpetuals in HEDGE mode)
+- `level_id`: Optional identifier tag

@@ -753,10 +753,11 @@ async def manage_bots(
 @mcp.tool()
 @handle_errors("manage executors")
 async def manage_executors(
-        action: Literal["create", "search", "get", "stop", "get_summary", "get_preferences", "save_preferences", "reset_preferences", "positions_summary", "get_position", "clear_position"] | None = None,
+        action: Literal["create", "search", "stop", "get_logs", "get_preferences", "save_preferences", "reset_preferences", "positions_summary", "clear_position"] | None = None,
         executor_type: str | None = None,
         executor_config: dict[str, Any] | None = None,
         executor_id: str | None = None,
+        log_level: str | None = None,
         account_names: list[str] | None = None,
         connector_names: list[str] | None = None,
         trading_pairs: list[str] | None = None,
@@ -813,10 +814,13 @@ async def manage_executors(
     Executors are automated trading components that execute specific strategies.
     This tool guides you through understanding, creating, monitoring, and stopping executors.
 
-    IMPORTANT: When creating any executor, you MUST ask the user for `total_amount_quote` (the capital
-    to allocate) before creating. Never assume or default this value. The amount is denominated in the
-    quote currency of the trading pair (e.g., BRL for BTC-BRL, USDT for BTC-USDT). If the user gives
-    a USD amount, convert it to the quote currency first.
+    IMPORTANT: When creating any executor, you MUST ask the user how much capital to allocate before creating.
+    Each executor type uses a DIFFERENT amount field:
+    - grid_executor: `total_amount_quote` (quote currency, e.g., 100 USDT)
+    - position_executor: `amount` (BASE currency, e.g., 0.01 BTC). Convert from USD: amount = usd / price
+    - dca_executor: `amounts_quote` (list of quote amounts per level, e.g., [100, 100, 150])
+    - order_executor: `amount` (base currency, or '$100' for USD value)
+    Never assume or default these values. Always check the guide first via progressive disclosure.
 
     IMPORTANT - Grid Executor Side:
     When creating a grid_executor, you MUST explicitly set the `side` parameter using numeric enum values:
@@ -836,26 +840,25 @@ async def manage_executors(
     Progressive Flow:
     1. executor_type only → Show config schema with your saved defaults applied
     2. action="create" + executor_config → Create executor (merged with your defaults)
-    3. action="search" → Search/list executors with filters
-    4. action="get" + executor_id → Get specific executor details
-    5. action="stop" + executor_id → Stop executor (with keep_position option)
-    6. action="get_summary" → Get overall executor summary
+    3. action="search" → Search/list executors with filters (add executor_id to get detail for one)
+    4. action="stop" + executor_id → Stop executor (with keep_position option)
+    5. action="get_logs" + executor_id → Get executor logs (only for active executors, logs cleared on completion)
 
     Preference Management (stored in ~/.hummingbot_mcp/executor_preferences.md):
-    7. action="get_preferences" → View raw markdown preferences file (read before saving)
-    8. action="save_preferences" + preferences_content → Save complete preferences file content
-    9. action="reset_preferences" → Reset all preferences to defaults
+    6. action="get_preferences" → View raw markdown preferences file (read before saving)
+    7. action="save_preferences" + preferences_content → Save complete preferences file content
+    8. action="reset_preferences" → Reset all preferences to defaults
 
     Position Management:
-    10. action="positions_summary" → Get aggregated positions summary
-    11. action="get_position" + connector_name + trading_pair → Get specific position details
-    12. action="clear_position" + connector_name + trading_pair → Clear position closed manually
+    9. action="positions_summary" → Get all positions (add connector_name + trading_pair for specific one)
+    10. action="clear_position" + connector_name + trading_pair → Clear position closed manually
 
     Args:
         action: Action to perform. Leave empty to see executor types or config schema.
         executor_type: Type of executor (e.g., 'position_executor', 'dca_executor'). Provide to see config schema.
         executor_config: Configuration for creating an executor. Required for 'create' action.
-        executor_id: Executor ID for 'get' or 'stop' actions.
+        executor_id: Executor ID for 'search' (detail), 'stop', or 'get_logs' actions.
+        log_level: Filter logs by level - 'ERROR', 'WARNING', 'INFO', 'DEBUG' (for get_logs).
         account_names: Filter by account names (for search).
         connector_names: Filter by connector names (for search).
         trading_pairs: Filter by trading pairs (for search).
@@ -876,6 +879,7 @@ async def manage_executors(
         executor_type=executor_type,
         executor_config=executor_config,
         executor_id=executor_id,
+        log_level=log_level,
         account_names=account_names,
         connector_names=connector_names,
         trading_pairs=trading_pairs,
