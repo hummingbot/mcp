@@ -39,6 +39,11 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 - `quote_amount`: Amount of quote token to provide
 - `side`: Position side (0=BOTH, 1=BUY/quote-only, 2=SELL/base-only)
 
+**Auto-Close (Limit Range Orders):**
+- `auto_close_above_range_seconds`: Close when price >= upper_price for this many seconds
+- `auto_close_below_range_seconds`: Close when price <= lower_price for this many seconds
+- Set to `null` (default) to disable auto-close
+
 #### Single-Sided vs Double-Sided Positions
 
 **Single-sided (one asset only):**
@@ -58,6 +63,36 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 **Position Management:**
 - `keep_position=false` (default): Close LP position when executor stops
 - `keep_position=true`: Leave position open on-chain, stop monitoring only
+- `position_offset_pct`: Offset from current price for single-sided positions (default: 0.01%)
+
+#### Limit Range Orders (Auto-Close Feature)
+
+Use `auto_close_above_range_seconds` and `auto_close_below_range_seconds` to create limit-order-style LP positions that automatically close when price moves through the range.
+
+**SELL Limit (Take Profit on Long):**
+```
+side=2, base_amount=X, quote_amount=0
+lower_price > current_price (range above current price)
+auto_close_above_range_seconds=60
+```
+- Position starts OUT_OF_RANGE (price below range)
+- When price rises into range: base → quote conversion, fees earned
+- When price rises above range for 60s: position auto-closes with quote tokens
+
+**BUY Limit (Accumulate on Dip):**
+```
+side=1, base_amount=0, quote_amount=X
+upper_price < current_price (range below current price)
+auto_close_below_range_seconds=60
+```
+- Position starts OUT_OF_RANGE (price above range)
+- When price falls into range: quote → base conversion, fees earned
+- When price falls below range for 60s: position auto-closes with base tokens
+
+**Key Benefits:**
+- Earn LP fees while price moves through your target range
+- Automatic execution without monitoring
+- Better fills than traditional limit orders (continuous conversion vs single fill)
 
 #### Meteora Strategy Types (extra_params.strategyType)
 

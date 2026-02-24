@@ -97,6 +97,20 @@ order_executor:
   # price: "95000"
 ```
 
+### Lp Executor Defaults
+
+```yaml
+lp_executor:
+  # Set your preferred defaults here (all optional, ask user if not set):
+  # connector_name: meteora/clmm  # Must include /clmm suffix
+  # trading_pair: SOL-USDC
+  # extra_params:
+  #   strategyType: 0  # Meteora only: 0=Spot, 1=Curve, 2=Bid-Ask
+  #
+  # Note: base_token/quote_token are inferred from trading_pair
+  # Note: side is determined by amounts at creation time, not defaulted
+```
+
 ---
 
 *Last updated: Never*
