@@ -28,15 +28,15 @@ NOT_ACTIVE → OPENING → IN_RANGE ↔ OUT_OF_RANGE → CLOSING → COMPLETE
 #### Key Parameters
 
 **Required:**
-- `connector_name`: CLMM connector in `connector/clmm` format (e.g., `meteora/clmm`, `raydiumclmm/clmm`)
+- `connector_name`: CLMM connector in `connector/clmm` format (e.g., `meteora/clmm`, `raydium/clmm`)
   - **IMPORTANT:** Must include the `/clmm` suffix — using just `meteora` will fail
 - `trading_pair`: Token pair (e.g., `SOL-USDC`)
 - `pool_address`: Pool contract address
 - `lower_price` / `upper_price`: Price range bounds
 
 **Liquidity:**
-- `base_amount`: Amount of base token to provide
-- `quote_amount`: Amount of quote token to provide
+- `base_amount`: Amount of base token to provide (default: 0)
+- `quote_amount`: Amount of quote token to provide (default: 0)
 - `side`: Position side (0=BOTH, 1=BUY/quote-only, 2=SELL/base-only)
 
 **Auto-Close (Limit Range Orders):**
