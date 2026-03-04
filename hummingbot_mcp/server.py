@@ -4,14 +4,11 @@ Main MCP server for Hummingbot API integration
 
 import asyncio
 import logging
-import os
-import platform
 import sys
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from hummingbot_mcp.api_servers import api_servers_config
 from hummingbot_mcp.formatters import (
     format_active_bots_as_table,
     format_bot_logs_as_table,
@@ -103,150 +100,81 @@ async def setup_connector(
 
 
 @mcp.tool()
-@handle_errors("configure API servers")
-async def configure_api_servers(
-        action: str | None = None,
+@handle_errors("configure server")
+async def configure_server(
         name: str | None = None,
         host: str | None = None,
         port: int | None = None,
         username: str | None = None,
         password: str | None = None,
 ) -> str:
-    """Configure API servers using progressive disclosure.
+    """Configure the active Hummingbot API server connection.
 
-    This tool helps you manage multiple Hummingbot API servers with a simple flow:
-    1. No parameters → List all configured servers
-    2. action="add" + name + (optional host/port/username/password) → Add a new server
-    3. action="modify" + name + (host/port/username/password) → Modify existing server (partial updates supported)
-    4. action="set_default" + name → Set a server as default (reconnects client)
-    5. action="remove" + name → Remove a server
+    This tool manages a single API server connection:
+    1. No parameters → Show the current server configuration
+    2. Any parameters → Update the server config and reconnect
+
+    Only the provided parameters are changed; omitted ones keep their current values.
 
     Args:
-        action: Action to perform ('add', 'modify', 'set_default', 'remove'). Leave empty to list servers.
-        name: Server name (required for all actions)
-        host: API host (optional, defaults to 'localhost' for 'add'. Examples: 'localhost', 'host.docker.internal', '72.212.424.42')
-        port: API port (optional, defaults to 8000 for 'add')
-        username: API username (optional for 'add', defaults to 'admin'; optional for 'modify')
-        password: API password (optional for 'add', defaults to 'admin'; optional for 'modify')
+        name: Server label (e.g., 'macmini', 'production')
+        host: API host (e.g., 'localhost', 'host.docker.internal', '72.212.424.42')
+        port: API port (e.g., 8000)
+        username: API username
+        password: API password
     """
-    # No action = list servers
-    if action is None:
-        servers = api_servers_config.list_servers()
-        result = "Configured API Servers:\n\n"
-        for server_name, server_info in servers.items():
-            default_marker = " (DEFAULT)" if server_info["is_default"] else ""
-            result += f"- {server_name}{default_marker}\n"
-            result += f"  URL: {server_info['url']}\n"
-            result += f"  Username: {server_info['username']}\n\n"
-        return result
+    from hummingbot_mcp.settings import ServerConfig, _load_server_config, save_server_config
 
-    # Validate name for all actions
-    if name is None:
-        return "Error: 'name' parameter is required for all actions"
-
-    # Add server
-    if action == "add":
-        # Apply defaults and construct URL from host and port
-        if host is None:
-            host = "localhost"
-        if port is None:
-            port = 8000
-
-        url = f"http://{host}:{port}"
-
-        result = api_servers_config.add_server(
-            name=name,
-            url=url,
-            username=username or "admin",
-            password=password or "admin",
+    # No params → show active server
+    if name is None and host is None and port is None and username is None and password is None:
+        current = _load_server_config()
+        return (
+            f"Active Server:\n\n"
+            f"  Name: {current.name}\n"
+            f"  URL: {current.url}\n"
+            f"  Username: {current.username}\n"
         )
 
-        # Add Docker networking warning for localhost URLs
-        if host == "localhost" and os.getenv("DOCKER_CONTAINER") == "true":
-            system = platform.system()
-            if system in ["Darwin", "Windows"]:
-                result += (
-                    "\n\n⚠️  Docker Networking Notice:\n"
-                    f"You're running on {system} and using 'localhost' as the host.\n"
-                    "Docker containers on Mac/Windows cannot access 'localhost' on the host.\n"
-                    f"If connection fails, use 'host.docker.internal' instead:\n"
-                    f"  configure_api_servers(action='add', name='{name}', "
-                    f"host='host.docker.internal', port={port}, ...)"
-                )
+    # Build new config with partial updates
+    current = _load_server_config()
 
-        return result
+    from urllib.parse import urlparse
+    parsed = urlparse(current.url)
+    current_host = parsed.hostname or "localhost"
+    current_port = parsed.port or 8000
 
-    # Modify server
-    elif action == "modify":
-        # Construct URL from host and port if either is provided
-        url = None
-        if host is not None or port is not None:
-            # Get current server config to use existing values as defaults
-            servers = api_servers_config.list_servers()
-            if name not in servers:
-                return f"Error: Server '{name}' not found"
+    final_name = name if name is not None else current.name
+    final_host = host if host is not None else current_host
+    final_port = port if port is not None else current_port
+    final_username = username if username is not None else current.username
+    final_password = password if password is not None else current.password
 
-            current_server = servers[name]
-            current_url = current_server["url"]
+    new_config = ServerConfig(
+        name=final_name,
+        url=f"http://{final_host}:{final_port}",
+        username=final_username,
+        password=final_password,
+    )
 
-            # Parse current URL to extract host and port
-            from urllib.parse import urlparse
-            parsed = urlparse(current_url)
-            current_host = parsed.hostname or "localhost"
-            current_port = parsed.port or 8000
+    # Persist and apply
+    save_server_config(new_config)
+    settings.reload_from_server_config(new_config)
+    await hummingbot_client.close()
 
-            # Use provided values or fall back to current values
-            final_host = host if host is not None else current_host
-            final_port = port if port is not None else current_port
-
-            url = f"http://{final_host}:{final_port}"
-
-        result = api_servers_config.modify_server(name=name, url=url, username=username, password=password)
-
-        # Check if we modified the default server and need to reconnect
-        default_server = api_servers_config.get_default_server()
-        if default_server.name == name:
-            settings.reload_from_default_server()
-            await hummingbot_client.close()
-            try:
-                await hummingbot_client.initialize(force=True)
-                return f"{result}. Client reconnected successfully."
-            except Exception as e:
-                return f"{result}. Warning: Could not connect to server - {str(e)}"
-
-        return result
-
-    # Set default server
-    elif action == "set_default":
-        result = api_servers_config.set_default(name)
-
-        # Reload settings and reconnect client
-        settings.reload_from_default_server()
-        await hummingbot_client.close()
-        try:
-            await hummingbot_client.initialize(force=True)
-            return f"{result}. Client reconnected successfully."
-        except Exception as e:
-            return f"{result}. Warning: Could not connect to server - {str(e)}"
-
-    # Remove server
-    elif action == "remove":
-        result = api_servers_config.remove_server(name)
-
-        # Reload settings and reconnect if there are remaining servers
-        try:
-            settings.reload_from_default_server()
-            await hummingbot_client.close()
-            await hummingbot_client.initialize(force=True)
-            default_server = api_servers_config.get_default_server()
-            result += f" New default is '{default_server.name}'."
-        except Exception:
-            pass
-
-        return result
-
-    else:
-        return f"Error: Invalid action '{action}'. Use 'add', 'modify', 'set_default', or 'remove'"
+    try:
+        await hummingbot_client.initialize(force=True)
+        return (
+            f"Server '{new_config.name}' configured and connected successfully.\n\n"
+            f"  URL: {new_config.url}\n"
+            f"  Username: {new_config.username}\n"
+        )
+    except Exception as e:
+        return (
+            f"Server '{new_config.name}' configured but could not connect.\n\n"
+            f"  URL: {new_config.url}\n"
+            f"  Username: {new_config.username}\n\n"
+            f"Error: {str(e)}\n"
+        )
 
 
 @mcp.tool()
@@ -1193,7 +1121,7 @@ async def main():
     logger.info(f"Configured API URL: {settings.api_url}")
     logger.info(f"Default Account: {settings.default_account}")
     logger.info("Server will connect to API on first use (lazy initialization)")
-    logger.info("💡 Use 'configure_api_servers' tool to manage API server connections")
+    logger.info("💡 Use 'configure_server' tool to view or update the API server connection")
 
     # Run the server with FastMCP
     # Connection to API will happen lazily on first tool use
