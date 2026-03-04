@@ -5,7 +5,7 @@
       "command": "/Users/dman/.local/bin/uv",
       "args": [
         "--directory",
-        "/Users/dman/Documents/code/mcp",
+        "/Users/dman/Documents/mcp",
         "run",
         "main.py"
       ],
