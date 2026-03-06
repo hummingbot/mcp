@@ -62,6 +62,33 @@ async def place_order(
     return {"result": result}
 
 
+async def cancel_order(
+    client: Any,
+    connector_name: str,
+    order_id: str,
+    account_name: str = "master_account",
+) -> dict[str, Any]:
+    """
+    Cancel an active order on an exchange.
+
+    Args:
+        client: Hummingbot API client
+        connector_name: Exchange connector name
+        order_id: The client_order_id of the order to cancel
+        account_name: Account name
+
+    Returns:
+        Dictionary containing cancellation result
+    """
+    result = await client.trading.cancel_order(
+        account_name=account_name,
+        connector_name=connector_name,
+        client_order_id=order_id,
+    )
+
+    return {"result": result}
+
+
 async def set_position_mode_and_leverage(
     client: Any,
     account_name: str,

@@ -285,6 +285,32 @@ async def place_order(
 
 
 @mcp.tool()
+@handle_errors("cancel order")
+async def cancel_order(
+        connector_name: str,
+        order_id: str,
+        account_name: str = "master_account",
+) -> str:
+    """Cancel an active order on an exchange.
+
+    Use get_portfolio_overview (with include_active_orders=True) or search_history to find the order_id.
+
+    Args:
+        connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
+        order_id: The client_order_id of the order to cancel
+        account_name: Account name (default: master_account)
+    """
+    client = await hummingbot_client.get_client()
+    result = await trading_tools.cancel_order(
+        client=client,
+        connector_name=connector_name,
+        order_id=order_id,
+        account_name=account_name,
+    )
+    return f"Cancel Order Result: {result['result']}"
+
+
+@mcp.tool()
 @handle_errors("set position mode and leverage")
 async def set_account_position_mode_and_leverage(
         account_name: str,
