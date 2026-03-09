@@ -1146,7 +1146,7 @@ async def manage_gateway_clmm(
         return f"Gateway CLMM Position Management Result: {result}"
 
 
-async def main():
+async def _run():
     """Run the MCP server"""
     # Setup logging once at application start
     logger.info("Starting Hummingbot MCP Server")
@@ -1164,5 +1164,10 @@ async def main():
         await hummingbot_client.close()
 
 
+def main():
+    """Entry point for uvx/pip console_scripts."""
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

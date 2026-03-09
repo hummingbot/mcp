@@ -1,6 +1,6 @@
 [project]
 name = "hummingbot_mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for Hummingbot API integration - manage crypto trading across multiple exchanges"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,6 +28,7 @@ Repository = "https://github.com/hummingbot/mcp"
 Issues = "https://github.com/hummingbot/mcp/issues"
 
 [project.scripts]
+hummingbot-mcp = "hummingbot_mcp:main"
 mcp-hummingbot = "hummingbot_mcp:main"
 
 [build-system]
