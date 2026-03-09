@@ -269,54 +269,33 @@ For cloud deployment where both Hummingbot API and MCP server run on the same se
    docker ps
    ```
 
-## Managing Multiple API Servers
+## Server Configuration
 
-The MCP server now supports managing multiple Hummingbot API servers. This is useful when you have multiple deployments or environments.
+On first run, the server creates a default configuration from environment variables (or uses `http://localhost:8000` with default credentials). Configuration is stored in `~/.hummingbot_mcp/server.yml`.
 
-### Initial Setup
-
-On first run, the server creates a default server from environment variables (or uses `http://localhost:8000` with default credentials). Configuration is stored in `~/.hummingbot_mcp/servers.yml`.
-
-### Using the configure_api_servers Tool
+### Using the configure_server Tool
 
 ```
-# List all configured servers
-configure_api_servers()
+# Show the current server configuration
+configure_server()
 
-# Add a new server using full URL
-configure_api_servers(
-    action="add",
+# Update the host and port
+configure_server(host="192.168.1.100", port=8001)
+
+# Update credentials
+configure_server(username="admin", password="secure_password")
+
+# Update everything at once
+configure_server(
     name="production",
-    url="http://prod-server:8000",
+    host="prod-server",
+    port=8000,
     username="admin",
     password="secure_password"
 )
-
-# Add a server using just port (defaults to localhost)
-configure_api_servers(
-    action="add",
-    name="local_8001",
-    port=8001,
-    username="admin",
-    password="secure_password"
-)
-
-# Add a server using default port 8000
-configure_api_servers(
-    action="add",
-    name="local_default",
-    username="admin",
-    password="secure_password"
-)
-
-# Switch to a different server
-configure_api_servers(action="set_default", name="production")
-
-# Remove a server
-configure_api_servers(action="remove", name="old_server")
 ```
 
-All subsequent API calls will use the currently selected default server.
+Only the provided parameters are changed; omitted ones keep their current values. The client automatically reconnects after any update.
 
 ## Environment Variables
 
@@ -332,7 +311,7 @@ The following environment variables can be set in your `.env` file for the MCP s
 | `HUMMINGBOT_RETRY_DELAY` | `2.0` | Delay between retries in seconds |
 | `HUMMINGBOT_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 
-**Note**: After initial setup, use the `configure_api_servers` tool to manage servers. Environment variables are only used to create the initial default server.
+**Note**: After initial setup, use the `configure_server` tool to update the server connection. Environment variables are only used to create the initial default configuration.
 
 ## Requirements
 
@@ -345,12 +324,10 @@ The following environment variables can be set in your `.env` file for the MCP s
 The MCP server provides tools for:
 
 ### Server Management
-- **configure_api_servers**: Manage multiple Hummingbot API server connections
-  - List all configured servers
-  - Add new servers with credentials
-  - Set default server (automatically reconnects client)
-  - Remove servers
-  - Configuration persists in `~/.hummingbot_mcp/servers.yml`
+- **configure_server**: View or update the active Hummingbot API server connection
+  - No parameters: show current server config
+  - Any parameters: update and reconnect
+  - Configuration persists in `~/.hummingbot_mcp/server.yml`
 
 ### Trading & Account Management
 - Account management and connector setup
@@ -391,7 +368,7 @@ The error messages will include:
 - The exact URL being used
 - Your configured username (password is masked)
 - Specific suggestions on how to fix the issue
-- References to tools like `configure_api_servers`
+- References to tools like `configure_server`
 
 ### Common Solutions
 
@@ -400,11 +377,11 @@ The error messages will include:
    - Verify the API is accessible at the configured URL
 
 2. **Wrong Credentials**:
-   - Use `configure_api_servers` tool to update server credentials
+   - Use `configure_server` tool to update server credentials
    - Or check your `.env` file configuration
 
 3. **Wrong URL**:
-   - Use `configure_api_servers` tool to update the server URL
+   - Use `configure_server` tool to update the server URL
    - For Docker on Mac/Windows, use `host.docker.internal` instead of `localhost`
 
 4. **Docker Network Issues**:
@@ -417,4 +394,4 @@ The MCP server will:
 - **Not retry** on authentication failures (401 errors) - it will immediately tell you the credentials are wrong
 - **Retry** on connection failures with helpful messages about what might be wrong
 - **Provide context** about whether you're running in Docker and suggest appropriate fixes
-- **Guide you** to the right tools (`configure_api_servers`) to fix issues
+- **Guide you** to the right tools (`configure_server`) to fix issues

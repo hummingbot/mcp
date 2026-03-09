@@ -74,7 +74,7 @@ class HummingbotClient:
                         f"  - Password: {'*' * len(settings.api_password)}\n\n"
                         f"💡 Solutions:\n"
                         f"  1. Verify your API credentials are correct\n"
-                        f"  2. Use the 'configure_api_servers' tool to update server credentials\n"
+                        f"  2. Use 'configure_server' tool with username/password to update credentials\n"
                         f"  3. Check your Hummingbot API server configuration\n\n"
                         f"Original error: {e}"
                     )
@@ -97,7 +97,7 @@ class HummingbotClient:
                 f"💡 Solutions:\n"
                 f"  1. Ensure the Hummingbot API is running and accessible\n"
                 f"  2. Verify the API URL is correct: {settings.api_url}\n"
-                f"  3. Use 'configure_api_servers' tool to update server configuration\n\n"
+                f"  3. Use 'configure_server' tool with host/port to update the connection\n\n"
             )
 
             # Add Docker networking warning for localhost URLs
@@ -109,10 +109,7 @@ class HummingbotClient:
                         f"You're running on {system} and trying to connect to 'localhost'.\n"
                         f"Docker containers on Mac/Windows cannot access 'localhost' on the host.\n\n"
                         f"💡 Try using 'host.docker.internal' instead:\n"
-                        f"  Use the 'configure_api_servers' tool:\n"
-                        f"    action='modify'\n"
-                        f"    name='<your_server_name>'\n"
-                        f"    host='host.docker.internal'\n\n"
+                        f"  Use 'configure_server' tool with host='host.docker.internal'\n\n"
                     )
 
             error_message += f"Original error: {last_error}"
@@ -124,7 +121,7 @@ class HummingbotClient:
                 f"💡 Solutions:\n"
                 f"  1. Check if the API is running and accessible\n"
                 f"  2. Verify your credentials are correct\n"
-                f"  3. Use 'configure_api_servers' tool for setup\n\n"
+                f"  3. Use 'configure_server' tool with host/port to configure the server\n\n"
                 f"Original error: {last_error}"
             )
         raise self._last_error
