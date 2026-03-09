@@ -101,6 +101,7 @@ async def manage_gateway_swaps(client: Any, request: GatewaySwapRequest) -> dict
             "trading_pair": request.trading_pair,
             "side": request.side,
             "amount": request.amount,
+            "wallet_address": request.wallet_address or "(default)",
             "result": result
         }
 
