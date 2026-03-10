@@ -765,6 +765,14 @@ async def manage_executors(
     want automated SL/TP management (use position_executor instead).
     Execution strategies: MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER.
 
+    ## lp_executor
+    Manages liquidity provider positions on CLMM DEXs (Meteora, Raydium).
+    Use when: Providing liquidity on Solana DEXs, want automated position monitoring and fee tracking.
+    Avoid when: Trading on CEX, want directional exposure only, not familiar with impermanent loss risks.
+    Connector must use `/clmm` suffix (e.g., `meteora/clmm`, `raydium/clmm`).
+    Supports single-sided (base or quote only) and double-sided positions.
+    Auto-close feature enables limit-order-style LP positions.
+
     Executors are automated trading components that execute specific strategies.
     This tool guides you through understanding, creating, monitoring, and stopping executors.
 
@@ -774,6 +782,7 @@ async def manage_executors(
     - position_executor: `amount` (BASE currency, e.g., 0.01 BTC). Convert from USD: amount = usd / price
     - dca_executor: `amounts_quote` (list of quote amounts per level, e.g., [100, 100, 150])
     - order_executor: `amount` (base currency, or '$100' for USD value)
+    - lp_executor: `base_amount` and/or `quote_amount` (token amounts to provide as liquidity)
     Never assume or default these values. Always check the guide first via progressive disclosure.
 
     IMPORTANT - Grid Executor Side:
