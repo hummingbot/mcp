@@ -2,91 +2,13 @@
 Trading operations business logic.
 
 This module provides the core business logic for trading operations including
-placing orders, managing positions, and setting account configurations.
+managing positions and setting account configurations.
+
+For order placement and cancellation, use `manage_executors` with `order_executor` type.
 """
 from typing import Any, Literal
 
 from hummingbot_mcp.formatters import format_orders_as_table, format_positions_as_table
-
-
-async def place_order(
-    client: Any,
-    connector_name: str,
-    trading_pair: str,
-    trade_type: str,
-    amount: str,
-    order_type: str = "MARKET",
-    price: str | None = None,
-    position_action: str | None = "OPEN",
-    account_name: str | None = "master_account",
-) -> dict[str, Any]:
-    """
-    Place a buy or sell order on an exchange.
-
-    Args:
-        client: Hummingbot API client
-        connector_name: Exchange connector name
-        trading_pair: Trading pair (e.g., BTC-USDT)
-        trade_type: Order side ('BUY' or 'SELL')
-        amount: Order amount (supports USD values with '$' prefix)
-        order_type: Order type ('MARKET' or 'LIMIT')
-        price: Price for limit orders
-        position_action: Position action ('OPEN', 'CLOSE')
-        account_name: Account name
-
-    Returns:
-        Dictionary containing order result
-    """
-    # Handle USD amount conversion
-    if "$" in amount and price is None:
-        prices = await client.market_data.get_prices(
-            connector_name=connector_name, trading_pairs=trading_pair
-        )
-        price = prices["prices"][trading_pair]
-        amount_float = float(amount.replace("$", "")) / price
-    else:
-        amount_float = float(amount)
-
-    # Place the order
-    result = await client.trading.place_order(
-        account_name=account_name,
-        connector_name=connector_name,
-        trading_pair=trading_pair,
-        trade_type=trade_type,
-        amount=amount_float,
-        order_type=order_type,
-        price=price,
-        position_action=position_action,
-    )
-
-    return {"result": result}
-
-
-async def cancel_order(
-    client: Any,
-    connector_name: str,
-    order_id: str,
-    account_name: str = "master_account",
-) -> dict[str, Any]:
-    """
-    Cancel an active order on an exchange.
-
-    Args:
-        client: Hummingbot API client
-        connector_name: Exchange connector name
-        order_id: The client_order_id of the order to cancel
-        account_name: Account name
-
-    Returns:
-        Dictionary containing cancellation result
-    """
-    result = await client.trading.cancel_order(
-        account_name=account_name,
-        connector_name=connector_name,
-        client_order_id=order_id,
-    )
-
-    return {"result": result}
 
 
 async def set_position_mode_and_leverage(

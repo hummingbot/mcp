@@ -5,7 +5,7 @@ A professional Model Context Protocol server for Hummingbot API integration.
 Enables AI assistants to manage crypto trading across multiple exchanges.
 """
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __author__ = "Federico Cardoso"
 
 from .server import main

@@ -41,7 +41,7 @@ from hummingbot_mcp.tools.gateway import (
     manage_gateway_config as manage_gateway_config_impl,
     manage_gateway_container as manage_gateway_container_impl,
 )
-from hummingbot_mcp.tools.gateway_clmm import manage_gateway_clmm as manage_gateway_clmm_impl
+from hummingbot_mcp.tools.gateway_clmm import explore_gateway_clmm_pools as explore_gateway_clmm_pools_impl
 from hummingbot_mcp.tools.gateway_swap import manage_gateway_swaps as manage_gateway_swaps_impl
 from hummingbot_mcp.tools import history as history_tools
 
@@ -242,72 +242,6 @@ async def get_portfolio_overview(
 
 
 # Trading Tools
-
-
-@mcp.tool()
-@handle_errors("place order")
-async def place_order(
-        connector_name: str,
-        trading_pair: str,
-        trade_type: str,
-        amount: str,
-        price: str | None = None,
-        order_type: str = "MARKET",
-        position_action: str | None = "OPEN",
-        account_name: str | None = "master_account",
-) -> str:
-    """Place a buy or sell order on a OrderBook Exchange (supports USD values by adding at the start of the amount $).
-
-    Args:
-        connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
-        trading_pair: Trading pair (e.g., BTC-USDT, ETH-USD)
-        trade_type: Order side ('BUY' or 'SELL')
-        amount: Order amount (is always in base currency, if you want to use USD values, add a dollar sign at the start, e.g., '$100')
-        order_type: Order type ('MARKET' or 'LIMIT')
-        price: Price for limit orders (required for limit orders)
-        position_action: Position action ('OPEN', 'CLOSE'). Defaults to 'OPEN' and is useful for perpetuals with HEDGE mode where you
-        can hold a long and short position at the same time.
-        account_name: Account name (default: master_account)
-    """
-    client = await hummingbot_client.get_client()
-    result = await trading_tools.place_order(
-        client=client,
-        connector_name=connector_name,
-        trading_pair=trading_pair,
-        trade_type=trade_type,
-        amount=amount,
-        order_type=order_type,
-        price=price,
-        position_action=position_action,
-        account_name=account_name,
-    )
-    return f"Order Result: {result['result']}"
-
-
-@mcp.tool()
-@handle_errors("cancel order")
-async def cancel_order(
-        connector_name: str,
-        order_id: str,
-        account_name: str = "master_account",
-) -> str:
-    """Cancel an active order on an exchange.
-
-    Use get_portfolio_overview (with include_active_orders=True) or search_history to find the order_id.
-
-    Args:
-        connector_name: Exchange connector name (e.g., 'binance', 'binance_perpetual')
-        order_id: The client_order_id of the order to cancel
-        account_name: Account name (default: master_account)
-    """
-    client = await hummingbot_client.get_client()
-    result = await trading_tools.cancel_order(
-        client=client,
-        connector_name=connector_name,
-        order_id=order_id,
-        account_name=account_name,
-    )
-    return f"Cancel Order Result: {result['result']}"
 
 
 @mcp.tool()
@@ -728,10 +662,32 @@ async def manage_executors(
 ) -> str:
     """Manage trading executors with progressive disclosure for lifecycle management.
 
-    ⭐ PRIORITY: This is the DEFAULT tool for trading strategies like grid trading, DCA, position trading,
-    and arbitrage. Use executors FIRST unless the user explicitly asks for "controllers" or "bots".
+    ⭐ PRIORITY: This is the DEFAULT tool for ALL trading operations:
+    - **Buying/Selling**: Use `order_executor` — supports MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER strategies,
+      USD amounts ('$100'), leverage, position_action OPEN/CLOSE. To cancel: use action="stop" on the executor.
+    - **LP Positions**: Use `lp_executor` — opens/manages CLMM positions on Meteora, Raydium with full lifecycle tracking.
+      Use `explore_dex_pools` to discover pools first (list_pools, get_pool_info).
+    - **Grid/DCA/Position strategies**: Use grid_executor, dca_executor, position_executor.
 
     Available Executor Types:
+
+    ## order_executor
+    **THE standard way to buy/sell assets.** Simple order execution with retry logic and multiple execution strategies.
+    Closest executor to a plain BUY/SELL order but with strategy options.
+    Use when: Want to place a single buy or sell order with a specific execution strategy
+    (LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER). To cancel an order, use action="stop" on the executor.
+    Avoid when: Need complex multi-level strategies (use grid/dca instead),
+    want automated SL/TP management (use position_executor instead).
+    Execution strategies: MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER.
+
+    ## lp_executor
+    **THE standard way to manage LP positions.** Manages liquidity provider positions on CLMM DEXs (Meteora, Raydium).
+    Use when: Providing liquidity on Solana DEXs, want automated position monitoring and fee tracking.
+    Use `explore_dex_pools` to discover pools before opening positions.
+    Avoid when: Trading on CEX, want directional exposure only, not familiar with impermanent loss risks.
+    Connector must use `/clmm` suffix (e.g., `meteora/clmm`, `raydium/clmm`).
+    Supports single-sided (base or quote only) and double-sided positions.
+    Auto-close feature enables limit-order-style LP positions.
 
     ## position_executor
     Takes directional positions with defined entry, stop-loss, and take-profit levels.
@@ -755,23 +711,6 @@ async def manage_executors(
     - limit_price is the safety boundary — when price crosses it, the grid stops.
     - keep_position=false: closes position on stop (stop-loss-like exit).
     - keep_position=true: holds position on stop (wait for recovery).
-
-    ## order_executor
-    Simple order execution with retry logic and multiple execution strategies.
-    Closest executor to a plain BUY/SELL order but with strategy options.
-    Use when: Want to place a single buy or sell order with a specific execution strategy
-    (LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER).
-    Avoid when: Need complex multi-level strategies (use grid/dca instead),
-    want automated SL/TP management (use position_executor instead).
-    Execution strategies: MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER.
-
-    ## lp_executor
-    Manages liquidity provider positions on CLMM DEXs (Meteora, Raydium).
-    Use when: Providing liquidity on Solana DEXs, want automated position monitoring and fee tracking.
-    Avoid when: Trading on CEX, want directional exposure only, not familiar with impermanent loss risks.
-    Connector must use `/clmm` suffix (e.g., `meteora/clmm`, `raydium/clmm`).
-    Supports single-sided (base or quote only) and double-sided positions.
-    Auto-close feature enables limit-order-style LP positions.
 
     Executors are automated trading components that execute specific strategies.
     This tool guides you through understanding, creating, monitoring, and stopping executors.
@@ -1066,13 +1005,12 @@ async def manage_gateway_swaps(
 
 
 @mcp.tool()
-@handle_errors("manage gateway CLMM", GATEWAY_LOG_HINT)
-async def manage_gateway_clmm(
-        action: Literal["list_pools", "get_pool_info", "open_position", "close_position", "collect_fees", "get_positions"],
+@handle_errors("explore DEX pools", GATEWAY_LOG_HINT)
+async def explore_dex_pools(
+        action: Literal["list_pools", "get_pool_info"],
         connector: str | None = None,
         network: str | None = None,
         pool_address: str | None = None,
-        position_address: str | None = None,
         page: int = 0,
         limit: int = 50,
         search_term: str | None = None,
@@ -1080,34 +1018,22 @@ async def manage_gateway_clmm(
         order_by: str | None = "desc",
         include_unknown: bool = True,
         detailed: bool = False,
-        wallet_address: str | None = None,
-        lower_price: str | None = None,
-        upper_price: str | None = None,
-        base_token_amount: str | None = None,
-        quote_token_amount: str | None = None,
-        slippage_pct: str | None = "1.0",
-        extra_params: dict[str, Any] | None = None,
 ) -> str:
-    """Manage Gateway CLMM pools and positions: explore pools, open/close positions, collect fees.
+    """Explore DeFi CLMM pools — discover pools, compare yields, and get pool details.
 
     Supports CLMM DEX connectors (Meteora, Raydium, Uniswap V3) for concentrated liquidity.
 
-    Pool Exploration:
     - list_pools: Browse available CLMM pools with filtering and sorting
     - get_pool_info: Get detailed information about a specific pool (requires network + pool_address)
 
-    Position Management:
-    - open_position: Create a new CLMM position with initial liquidity
-    - close_position: Close a position completely (removes all liquidity)
-    - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions for a specific pool (fetches real-time data from blockchain)
+    To manage LP positions, use `manage_executors` with `lp_executor` type.
+    To check on-chain positions, use `get_portfolio_overview` with `include_lp_positions=True`.
 
     Args:
-        action: Action to perform on CLMM pools or positions.
-        connector: CLMM connector name (e.g., 'meteora', 'raydium', 'uniswap'). Required for most actions.
-        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta'). Required for get_pool_info and position actions.
-        pool_address: Pool contract address (required for get_pool_info, open_position, get_positions).
-        position_address: Position NFT address (required for close_position and collect_fees).
+        action: Action to perform on CLMM pools.
+        connector: CLMM connector name (e.g., 'meteora', 'raydium', 'uniswap'). Required.
+        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta'). Required for get_pool_info.
+        pool_address: Pool contract address (required for get_pool_info).
         page: Page number for list_pools (default: 0).
         limit: Results per page for list_pools (default: 50, max: 100).
         search_term: Search term to filter pools by token symbols (e.g., 'SOL', 'USDC').
@@ -1115,20 +1041,12 @@ async def manage_gateway_clmm(
         order_by: Sort order for list_pools ('asc' or 'desc').
         include_unknown: Include pools with unverified tokens (default: True).
         detailed: Return detailed table with more columns for list_pools (default: False).
-        wallet_address: Wallet address for position actions (optional, uses default if not provided).
-        lower_price: Lower price bound for open_position (e.g., '150').
-        upper_price: Upper price bound for open_position (e.g., '250').
-        base_token_amount: Amount of base token for open_position (optional).
-        quote_token_amount: Amount of quote token for open_position (optional).
-        slippage_pct: Maximum slippage percentage for open_position (default: 1.0).
-        extra_params: Additional connector-specific parameters (e.g., {"strategyType": 0} for Meteora).
     """
     request = GatewayCLMMRequest(
         action=action,
         connector=connector,
         network=network,
         pool_address=pool_address,
-        position_address=position_address,
         page=page,
         limit=limit,
         search_term=search_term,
@@ -1136,23 +1054,11 @@ async def manage_gateway_clmm(
         order_by=order_by,
         include_unknown=include_unknown,
         detailed=detailed,
-        wallet_address=wallet_address,
-        lower_price=lower_price,
-        upper_price=upper_price,
-        base_token_amount=base_token_amount,
-        quote_token_amount=quote_token_amount,
-        slippage_pct=slippage_pct,
-        extra_params=extra_params,
     )
 
     client = await hummingbot_client.get_client()
-    result = await manage_gateway_clmm_impl(client, request)
-
-    # Pool actions return formatted output via format_gateway_clmm_pool_result
-    if action in ("list_pools", "get_pool_info"):
-        return format_gateway_clmm_pool_result(action, result)
-    else:
-        return f"Gateway CLMM Position Management Result: {result}"
+    result = await explore_gateway_clmm_pools_impl(client, request)
+    return format_gateway_clmm_pool_result(action, result)
 
 
 async def _run():

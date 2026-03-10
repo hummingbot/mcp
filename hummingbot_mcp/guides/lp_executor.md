@@ -1,4 +1,6 @@
 ### LP Executor
+**This is the standard way to manage LP positions on CLMM DEXs.**
+
 Manages liquidity provider positions on CLMM DEXs (Meteora, Raydium).
 Opens positions within price bounds, monitors range status, tracks fees.
 
@@ -102,19 +104,18 @@ auto_close_below_range_seconds=60
 
 #### Important: Managing Positions
 
-**Always use the executor tool (`manage_executors`) to open and close LP positions — NOT the gateway CLMM tool directly.**
+**Always use the executor tool (`manage_executors`) to open and close LP positions.**
 
-- Opening/closing via `manage_gateway_clmm` bypasses the executor state machine and leaves the database out of sync
 - Use `manage_executors` with `action="stop"` to properly close positions and update executor status
-- If a position is closed externally (via gateway or UI), manually mark the executor as `TERMINATED` in the database
+- If a position is closed externally (via DEX UI), manually mark the executor as `TERMINATED` in the database
 
 **Verifying position status:**
-- If uncertain about position status, use `manage_gateway_clmm` with `action="get_positions"` to check on-chain state
+- If uncertain about position status, use `get_portfolio_overview` with `include_lp_positions=True` to check on-chain state
 - Compare on-chain positions with executor `custom_info.position_address`
 - If position is closed on-chain but executor still shows `RUNNING`, manually update executor status in database to `TERMINATED`
 - If position is open on-chain but executor still shows `OPENING`, the executor should eventually sync — if stuck, check API logs for errors
 
 **Exception: Executor not found in API (404 error):**
 - If API was restarted, executors may no longer exist in memory but positions remain on-chain
-- In this case, use `manage_gateway_clmm` with `action="close_position"` to close the on-chain position directly
+- In this case, close the on-chain position directly via the DEX UI or gateway API
 - Then manually update the executor status in the database to `TERMINATED`

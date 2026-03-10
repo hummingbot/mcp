@@ -1,12 +1,13 @@
 """
 Gateway CLMM tools for Hummingbot MCP Server
 
-Handles DEX CLMM liquidity operations via Hummingbot Gateway:
+Handles DEX CLMM read-only operations via Hummingbot Gateway:
 - Pool exploration (list pools, get pool info)
-- Position management (open, close, collect fees, search positions)
+- Position queries (get positions)
+
+For opening/closing LP positions, use `manage_executors` with `lp_executor` type.
 """
 import logging
-from decimal import Decimal
 from typing import Any
 
 from hummingbot_mcp.exceptions import ToolError
@@ -109,21 +110,6 @@ def format_pools_as_detailed_table(pools: list[dict[str, Any]]) -> str:
     return f"{header}\n{separator}\n" + "\n".join(rows)
 
 
-async def manage_gateway_clmm(client: Any, request: GatewayCLMMRequest) -> dict[str, Any]:
-    """
-    Unified CLMM management: pool exploration and position management.
-
-    Routes to explore_gateway_clmm_pools for list_pools/get_pool_info
-    and manage_gateway_clmm_positions for open/close/collect/get positions.
-    """
-    if request.action in ("list_pools", "get_pool_info"):
-        return await explore_gateway_clmm_pools(client, request)
-    elif request.action in ("open_position", "close_position", "collect_fees", "get_positions"):
-        return await manage_gateway_clmm_positions(client, request)
-    else:
-        raise ToolError(f"Unknown action: {request.action}")
-
-
 async def explore_gateway_clmm_pools(client: Any, request: GatewayCLMMRequest) -> dict[str, Any]:
     """
     Explore Gateway CLMM pools: list pools and get pool information.
@@ -205,179 +191,3 @@ async def explore_gateway_clmm_pools(client: Any, request: GatewayCLMMRequest) -
         raise ToolError(f"Unknown action: {request.action}")
 
 
-async def manage_gateway_clmm_positions(client: Any, request: GatewayCLMMRequest) -> dict[str, Any]:
-    """
-    Manage Gateway CLMM positions: open, close, collect fees, and get positions.
-
-    Actions:
-    - open_position: Create a new CLMM position with initial liquidity
-    - close_position: Close a position completely (removes all liquidity)
-    - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions owned by a wallet for a specific pool (real-time data from blockchain)
-    """
-    try:
-        # ============================================
-        # OPEN POSITION - Create new position
-        # ============================================
-        if request.action == "open_position":
-            # Validate required parameters
-            if not request.connector:
-                raise ToolError("connector is required for open_position action")
-            if not request.network:
-                raise ToolError("network is required for open_position action")
-            if not request.pool_address:
-                raise ToolError("pool_address is required for open_position action")
-            if not request.lower_price:
-                raise ToolError("lower_price is required for open_position action")
-            if not request.upper_price:
-                raise ToolError("upper_price is required for open_position action")
-
-            result = await client.gateway_clmm.open_position(
-                connector=request.connector,
-                network=request.network,
-                pool_address=request.pool_address,
-                lower_price=Decimal(request.lower_price),
-                upper_price=Decimal(request.upper_price),
-                base_token_amount=Decimal(request.base_token_amount) if request.base_token_amount else None,
-                quote_token_amount=Decimal(request.quote_token_amount) if request.quote_token_amount else None,
-                slippage_pct=Decimal(request.slippage_pct or "1.0"),
-                wallet_address=request.wallet_address,
-                extra_params=request.extra_params
-            )
-
-            return {
-                "action": "open_position",
-                "connector": request.connector,
-                "network": request.network,
-                "pool_address": request.pool_address,
-                "wallet_address": request.wallet_address or "(default)",
-                "price_range": {
-                    "lower_price": request.lower_price,
-                    "upper_price": request.upper_price
-                },
-                "result": result
-            }
-
-        # ============================================
-        # CLOSE POSITION - Close position completely
-        # ============================================
-        elif request.action == "close_position":
-            # Validate required parameters
-            if not request.connector:
-                raise ToolError("connector is required for close_position action")
-            if not request.network:
-                raise ToolError("network is required for close_position action")
-            if not request.position_address:
-                raise ToolError("position_address is required for close_position action")
-
-            result = await client.gateway_clmm.close_position(
-                connector=request.connector,
-                network=request.network,
-                position_address=request.position_address,
-                wallet_address=request.wallet_address
-            )
-
-            return {
-                "action": "close_position",
-                "connector": request.connector,
-                "network": request.network,
-                "position_address": request.position_address,
-                "wallet_address": request.wallet_address or "(default)",
-                "result": result
-            }
-
-        # ============================================
-        # COLLECT FEES - Collect accumulated fees
-        # ============================================
-        elif request.action == "collect_fees":
-            # Validate required parameters
-            if not request.connector:
-                raise ToolError("connector is required for collect_fees action")
-            if not request.network:
-                raise ToolError("network is required for collect_fees action")
-            if not request.position_address:
-                raise ToolError("position_address is required for collect_fees action")
-
-            result = await client.gateway_clmm.collect_fees(
-                connector=request.connector,
-                network=request.network,
-                position_address=request.position_address,
-                wallet_address=request.wallet_address
-            )
-
-            return {
-                "action": "collect_fees",
-                "connector": request.connector,
-                "network": request.network,
-                "position_address": request.position_address,
-                "wallet_address": request.wallet_address or "(default)",
-                "result": result
-            }
-
-        # ============================================
-        # GET POSITIONS - Get positions for a specific pool
-        # ============================================
-        elif request.action == "get_positions":
-            # Validate required parameters
-            if not request.connector:
-                raise ToolError("connector is required for get_positions action")
-            if not request.network:
-                raise ToolError("network is required for get_positions action")
-            if not request.pool_address:
-                raise ToolError("pool_address is required for get_positions action")
-
-            result = await client.gateway_clmm.get_positions_owned(
-                connector=request.connector,
-                network=request.network,
-                pool_address=request.pool_address,
-                wallet_address=request.wallet_address
-            )
-
-            return {
-                "action": "get_positions",
-                "connector": request.connector,
-                "network": request.network,
-                "pool_address": request.pool_address,
-                "wallet_address": request.wallet_address or "(default)",
-                "result": result
-            }
-
-        else:
-            raise ToolError(f"Unknown action: {request.action}")
-
-    except ToolError:
-        raise
-    except Exception as e:
-        error_message = str(e)
-        logger.error(f"Error in manage_gateway_clmm_positions: {error_message}", exc_info=True)
-
-        # Provide more helpful error messages for common Gateway errors
-        if "'NoneType' object has no attribute 'get'" in error_message:
-            raise ToolError(
-                f"Gateway CLMM operation failed with internal error.\n\n"
-                f"⚠️  Gateway Error: {error_message}\n\n"
-                f"This error typically indicates:\n"
-                f"  1. Insufficient SOL balance for blockchain fees (~0.44 SOL needed for position creation)\n"
-                f"  2. Transaction simulation failure (wallet lacks funds)\n"
-                f"  3. Missing or invalid wallet configuration\n"
-                f"  4. Invalid pool or network parameters\n\n"
-                f"🔍 To diagnose the issue:\n"
-                f"  1. Check Gateway logs: manage_gateway_container(action='get_logs', tail=50)\n"
-                f"  2. Look for 'insufficient lamports' or 'Insufficient funds' messages\n"
-                f"  3. Verify wallet has enough SOL for transaction costs\n\n"
-                f"💰 Common fixes:\n"
-                f"  - Add at least 0.5 SOL to your wallet for position operations\n"
-                f"  - Verify wallet is properly configured in Gateway\n"
-                f"  - Check that the pool address and network are correct"
-            )
-
-        # Check for insufficient balance errors
-        if "insufficient" in error_message.lower() or "balance" in error_message.lower():
-            raise ToolError(
-                f"Gateway CLMM operation failed: Insufficient balance.\n\n"
-                f"Error: {error_message}\n\n"
-                f"💰 Your wallet doesn't have enough funds for this operation.\n"
-                f"   Check Gateway logs for specific balance requirements."
-            )
-
-        raise ToolError(f"Gateway CLMM position management failed: {error_message}")

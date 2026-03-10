@@ -603,45 +603,36 @@ class GatewaySwapRequest(BaseModel):
 
 
 class GatewayCLMMRequest(BaseModel):
-    """Request model for unified Gateway CLMM pool and position management operations.
+    """Request model for Gateway CLMM pool discovery.
 
-    This model supports all CLMM operations:
+    This model supports DeFi data exploration:
 
     Pool Exploration:
     - list_pools: Get list of available CLMM pools with filtering/sorting
     - get_pool_info: Get detailed information about a specific pool
 
-    Position Management:
-    - open_position: Create a new CLMM position with initial liquidity
-    - close_position: Close a position completely (removes all liquidity)
-    - collect_fees: Collect accumulated fees from a position
-    - get_positions: Get all positions owned by a wallet for a specific pool
+    To manage LP positions, use `manage_executors` with `lp_executor` type.
+    To check on-chain positions, use `get_portfolio_overview` with `include_lp_positions=True`.
     """
 
-    action: Literal["list_pools", "get_pool_info", "open_position", "close_position", "collect_fees", "get_positions"] = Field(
-        description="Action to perform on CLMM pools or positions"
+    action: Literal["list_pools", "get_pool_info"] = Field(
+        description="Action to perform on CLMM pools"
     )
 
     # Common parameters
     connector: str | None = Field(
         default=None,
-        description="CLMM connector name (required for most actions). Examples: 'meteora', 'raydium', 'uniswap'"
+        description="CLMM connector name (required). Examples: 'meteora', 'raydium', 'uniswap'"
     )
 
     network: str | None = Field(
         default=None,
-        description="Network ID in 'chain-network' format. Examples: 'solana-mainnet-beta', 'ethereum-mainnet'"
+        description="Network ID in 'chain-network' format (required for get_pool_info). Examples: 'solana-mainnet-beta', 'ethereum-mainnet'"
     )
 
     pool_address: str | None = Field(
         default=None,
-        description="Pool contract address (required for get_pool_info, open_position, get_positions)"
-    )
-
-    # Position parameters
-    position_address: str | None = Field(
-        default=None,
-        description="Position NFT address (required for close_position and collect_fees)"
+        description="Pool contract address (required for get_pool_info)"
     )
 
     # Pool listing parameters
@@ -681,40 +672,4 @@ class GatewayCLMMRequest(BaseModel):
     detailed: bool = Field(
         default=False,
         description="Return detailed table with more columns (default: False)"
-    )
-
-    # Position management parameters
-    wallet_address: str | None = Field(
-        default=None,
-        description="Wallet address (optional, uses default wallet if not provided)"
-    )
-
-    lower_price: str | None = Field(
-        default=None,
-        description="Lower price bound for new position (required for open_position). Example: '150'"
-    )
-
-    upper_price: str | None = Field(
-        default=None,
-        description="Upper price bound for new position (required for open_position). Example: '250'"
-    )
-
-    base_token_amount: str | None = Field(
-        default=None,
-        description="Amount of base token to provide (optional for open_position). Example: '0.01'"
-    )
-
-    quote_token_amount: str | None = Field(
-        default=None,
-        description="Amount of quote token to provide (optional for open_position). Example: '2'"
-    )
-
-    slippage_pct: str | None = Field(
-        default="1.0",
-        description="Maximum slippage percentage (optional for open_position, default: 1.0)"
-    )
-
-    extra_params: dict[str, Any] | None = Field(
-        default=None,
-        description="Additional connector-specific parameters (e.g., {'strategyType': 0} for Meteora)"
     )
