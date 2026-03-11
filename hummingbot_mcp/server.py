@@ -665,6 +665,7 @@ async def manage_executors(
     ⭐ PRIORITY: This is the DEFAULT tool for ALL trading operations:
     - **Buying/Selling**: Use `order_executor` — supports MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER strategies,
       USD amounts ('$100'), leverage, position_action OPEN/CLOSE. To cancel: use action="stop" on the executor.
+    - **DEX Swaps**: Use `swap_executor` — single swaps on Gateway AMM connectors (Jupiter, Raydium) with retry logic.
     - **LP Positions**: Use `lp_executor` — opens/manages CLMM positions on Meteora, Raydium with full lifecycle tracking.
       Use `explore_dex_pools` to discover pools first (list_pools, get_pool_info).
     - **Grid/DCA/Position strategies**: Use grid_executor, dca_executor, position_executor.
@@ -688,6 +689,14 @@ async def manage_executors(
     Connector must use `/clmm` suffix (e.g., `meteora/clmm`, `raydium/clmm`).
     Supports single-sided (base or quote only) and double-sided positions.
     Auto-close feature enables limit-order-style LP positions.
+
+    ## swap_executor
+    **Execute single swaps on Gateway AMM connectors with retry logic.**
+    Use when: Executing a single token swap on Solana DEXs (Jupiter, Raydium), need reliable execution with retries.
+    Avoid when: Need complex trading strategies, want LP positions (use lp_executor), trading on CEX (use order_executor).
+    Connector format: `jupiter/router` (Gateway router connector).
+    Parameters: connector_name, trading_pair, side (BUY/SELL), amount (base token).
+    Swaps are atomic — they either complete fully or not at all.
 
     ## position_executor
     Takes directional positions with defined entry, stop-loss, and take-profit levels.
@@ -722,6 +731,7 @@ async def manage_executors(
     - dca_executor: `amounts_quote` (list of quote amounts per level, e.g., [100, 100, 150])
     - order_executor: `amount` (base currency, or '$100' for USD value)
     - lp_executor: `base_amount` and/or `quote_amount` (token amounts to provide as liquidity)
+    - swap_executor: `amount` (base token amount to swap)
     Never assume or default these values. Always check the guide first via progressive disclosure.
 
     IMPORTANT - Grid Executor Side:

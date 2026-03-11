@@ -76,7 +76,8 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
             "- **dca_executor** — Dollar-cost averaging for gradual position building\n"
             "- **grid_executor** — Grid trading across multiple price levels in ranging markets\n"
             "- **order_executor** — Simple BUY/SELL order with execution strategy\n"
-            "- **lp_executor** — Liquidity provision on CLMM DEXs (Meteora, Raydium)\n\n"
+            "- **lp_executor** — Liquidity provision on CLMM DEXs (Meteora, Raydium)\n"
+            "- **swap_executor** — Single swap on Gateway AMM connectors (Jupiter, Raydium)\n\n"
             "Provide `executor_type` to see the configuration schema."
         )
 

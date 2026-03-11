@@ -534,10 +534,15 @@ class GatewaySwapRequest(BaseModel):
                     "Example: '1.5' for 1.5% slippage tolerance"
     )
 
-    # Execute-specific parameter
+    # Execute-specific parameters
     wallet_address: str | None = Field(
         default=None,
         description="Wallet address for execute action (optional, uses default wallet if not provided)"
+    )
+
+    account_name: str | None = Field(
+        default=None,
+        description="Account name for execute action (optional, default: 'master_account')"
     )
 
     # Get status parameter
