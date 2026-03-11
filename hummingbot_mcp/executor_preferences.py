@@ -111,6 +111,18 @@ lp_executor:
   # Note: side is determined by amounts at creation time, not defaulted
 ```
 
+### Swap Executor Defaults
+
+```yaml
+swap_executor:
+  # Set your preferred defaults here (all optional, ask user if not set):
+  # connector_name: jupiter/router
+  # trading_pair: SOL-USDC
+  # side: BUY  # BUY or SELL
+  # amount: "1.0"  # Base token amount
+  # slippage_pct: "0.5"  # Optional: override default slippage
+```
+
 ---
 
 *Last updated: Never*

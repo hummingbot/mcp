@@ -67,14 +67,12 @@ async def manage_gateway_swaps(client: Any, request: GatewaySwapRequest) -> dict
         }
 
     # ============================================
-    # EXECUTE - Execute swap transaction
+    # EXECUTE - Execute swap via swap_executor
     # ============================================
     elif request.action == "execute":
         # Validate required parameters
         if not request.connector:
             raise ToolError("connector is required for execute action")
-        if not request.network:
-            raise ToolError("network is required for execute action")
         if not request.trading_pair:
             raise ToolError("trading_pair is required for execute action")
         if not request.side:
@@ -86,14 +84,27 @@ async def manage_gateway_swaps(client: Any, request: GatewaySwapRequest) -> dict
         if "-" not in request.trading_pair:
             raise ToolError(f"Invalid trading_pair format. Expected 'BASE-QUOTE', got '{request.trading_pair}'")
 
-        result = await client.gateway_swap.execute_swap(
-            connector=request.connector,
-            network=request.network,
-            trading_pair=request.trading_pair,
-            side=request.side,
-            amount=Decimal(request.amount),
-            slippage_pct=Decimal(request.slippage_pct or "1.0"),
-            wallet_address=request.wallet_address
+        # Build connector name in gateway format: {connector}/router
+        connector_name = f"{request.connector}/router"
+
+        # Convert side to numeric (BUY=1, SELL=2)
+        side_value = 1 if request.side.upper() == "BUY" else 2
+
+        # Build executor config
+        executor_config = {
+            "type": "swap_executor",
+            "connector_name": connector_name,
+            "trading_pair": request.trading_pair,
+            "side": side_value,
+            "amount": str(request.amount),
+        }
+        if request.slippage_pct:
+            executor_config["slippage_pct"] = str(request.slippage_pct)
+
+        # Create swap executor
+        result = await client.executors.create_executor(
+            executor_config=executor_config,
+            account_name=request.account_name or "master_account"
         )
 
         return {
@@ -101,7 +112,9 @@ async def manage_gateway_swaps(client: Any, request: GatewaySwapRequest) -> dict
             "trading_pair": request.trading_pair,
             "side": request.side,
             "amount": request.amount,
-            "wallet_address": request.wallet_address or "(default)",
+            "connector_name": connector_name,
+            "executor_id": result.get("executor_id"),
+            "status": result.get("status"),
             "result": result
         }
 
