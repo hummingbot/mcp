@@ -43,6 +43,7 @@ from hummingbot_mcp.tools.gateway import (
 )
 from hummingbot_mcp.tools.gateway_clmm import explore_gateway_clmm_pools as explore_gateway_clmm_pools_impl
 from hummingbot_mcp.tools.gateway_swap import manage_gateway_swaps as manage_gateway_swaps_impl
+from hummingbot_mcp.tools.geckoterminal import explore_geckoterminal as explore_geckoterminal_impl
 from hummingbot_mcp.tools import history as history_tools
 
 # Configure root logger
@@ -187,7 +188,7 @@ async def get_portfolio_overview(
         include_lp_positions: bool = True,
         include_active_orders: bool = True,
         as_distribution: bool = False,
-        refresh: bool = False,
+        refresh: bool = True,
 ) -> str:
     """Get a unified portfolio overview with balances, perpetual positions, LP positions, and active orders.
 
@@ -214,7 +215,7 @@ async def get_portfolio_overview(
         include_lp_positions: Include LP (CLMM) positions in the overview (default: True)
         include_active_orders: Include active (open) orders in the overview (default: True)
         as_distribution: Show token balances as distribution percentages (default: False)
-        refresh: If True, refresh balances from exchanges before returning. If False, return cached state (default: False)
+        refresh: If True, refresh balances from exchanges before returning. If False, return cached state (default: True)
     """
     client = await hummingbot_client.get_client()
 
@@ -465,11 +466,14 @@ async def manage_controllers(
         controller_code: str | None = None,
         config_name: str | None = None,
         config_data: dict[str, Any] | None = None,
-        bot_name: str | None = None,
         confirm_override: bool = False,
+        include_code: bool = False,
 ) -> str:
     """
-    Manage controllers and their configurations: list, describe, create/update, delete.
+    Manage controller templates and saved configurations (design-time).
+
+    Works with reusable strategy definitions and parameter sets for future deployments.
+    Does NOT affect running bots. To modify a live bot's config, use manage_bots with action='update_config'.
 
     ⚠️ NOTE: For most trading strategies (grid, DCA, position trading), use manage_executors() instead.
     Only use controllers when the user EXPLICITLY asks for "controllers", "bots", or needs advanced
@@ -478,14 +482,15 @@ async def manage_controllers(
     Exploration flow:
     1. action="list" → List all controllers and their configs
     2. action="list" + controller_type → List controllers of that type with config counts
-    3. action="describe" + controller_name → Show controller code + list its configs + explain parameters
-    4. action="describe" + config_name → Show specific config details + which controller it uses
+    3. action="describe" + controller_name → Show config parameters template + list existing configs
+    4. action="describe" + config_name → Show specific config values + its controller's parameters
+    5. action="describe" + include_code=True → Also include the full controller source code
 
     Modification flow:
-    5. action="upsert" + target="controller" → Create/update a controller template
-    6. action="upsert" + target="config" → Create/update a controller config
-    7. action="delete" + target="controller" → Delete a controller template
-    8. action="delete" + target="config" → Delete a controller config
+    6. action="upsert" + target="controller" → Create/update a controller template
+    7. action="upsert" + target="config" → Create/update a saved controller config
+    8. action="delete" + target="controller" → Delete a controller template
+    9. action="delete" + target="config" → Delete a controller config
 
     Common Enum Values for Controller Configs:
 
@@ -512,8 +517,8 @@ async def manage_controllers(
         controller_code: Code for controller (required for controller upsert).
         config_name: Name of the config to describe or modify.
         config_data: Configuration data (required for config upsert). Must include 'controller_type' and 'controller_name'.
-        bot_name: Bot name (for modifying config in a specific bot).
         confirm_override: Required True if overwriting existing items.
+        include_code: If True, include full controller source code in describe output. Default False.
     """
     client = await hummingbot_client.get_client()
     result = await controllers_tools.manage_controllers(
@@ -525,8 +530,8 @@ async def manage_controllers(
         controller_code=controller_code,
         config_name=config_name,
         config_data=config_data,
-        bot_name=bot_name,
         confirm_override=confirm_override,
+        include_code=include_code,
     )
     # list/describe return formatted_output, upsert/delete return message
     return result.get("formatted_output") or result.get("message", str(result))
@@ -535,7 +540,7 @@ async def manage_controllers(
 @mcp.tool()
 @handle_errors("manage bots")
 async def manage_bots(
-        action: Literal["deploy", "status", "logs", "stop_bot", "stop_controllers", "start_controllers"],
+        action: Literal["deploy", "status", "logs", "stop_bot", "stop_controllers", "start_controllers", "get_config", "update_config"],
         bot_name: str | None = None,
         controllers_config: list[str] | None = None,
         account_name: str | None = "master_account",
@@ -546,8 +551,11 @@ async def manage_bots(
         limit: int = 50,
         search_term: str | None = None,
         controller_names: list[str] | None = None,
+        config_name: str | None = None,
+        config_data: dict[str, Any] | None = None,
+        confirm_override: bool = False,
 ) -> str:
-    """Manage controller-based bots: deploy, monitor, get logs, and control execution.
+    """Manage controller-based bots: deploy, monitor, get logs, control execution, and modify runtime configs.
 
     ⚠️ NOTE: For most trading strategies (grid, DCA, position trading), use manage_executors() instead.
     Only use bots when the user EXPLICITLY asks for "bot" deployment or needs advanced features like
@@ -560,10 +568,12 @@ async def manage_bots(
     - stop_bot: Stop and archive a bot forever (requires bot_name)
     - stop_controllers: Stop specific controllers in a bot (requires bot_name + controller_names)
     - start_controllers: Start/resume specific controllers (requires bot_name + controller_names)
+    - get_config: View current configs of a running bot (requires bot_name)
+    - update_config: Modify config of a controller INSIDE a running bot in real-time (requires bot_name + config_name + config_data)
 
     Args:
         action: Action to perform on bots.
-        bot_name: Name of the bot (required for deploy, logs, stop_bot, stop/start_controllers).
+        bot_name: Name of the bot (required for deploy, logs, stop_bot, stop/start_controllers, get_config, update_config).
         controllers_config: List of controller config names (required for deploy).
         account_name: Account name for deployment (default: master_account).
         max_global_drawdown_quote: Maximum global drawdown in quote currency (deploy only).
@@ -573,6 +583,9 @@ async def manage_bots(
         limit: Maximum log entries for 'logs' action (default: 50, max: 1000).
         search_term: Search term to filter logs by message content (logs only).
         controller_names: List of controller names (required for stop/start_controllers).
+        config_name: Name of the config to update (required for update_config).
+        config_data: New configuration data (required for update_config). Must include 'controller_type' and 'controller_name'.
+        confirm_override: Required True if overwriting existing config in a running bot (update_config only).
     """
     client = await hummingbot_client.get_client()
 
@@ -631,6 +644,26 @@ async def manage_bots(
         )
         return result["message"]
 
+    elif action == "get_config":
+        if not bot_name:
+            return "Error: 'bot_name' is required for get_config action"
+        result = await bot_management_tools.get_bot_controller_configs(client=client, bot_name=bot_name)
+        return result["formatted_output"]
+
+    elif action == "update_config":
+        if not bot_name:
+            return "Error: 'bot_name' is required for update_config action"
+        if not config_name or not config_data:
+            return "Error: 'config_name' and 'config_data' are required for update_config action"
+        result = await bot_management_tools.update_bot_controller_config(
+            client=client,
+            bot_name=bot_name,
+            config_name=config_name,
+            config_data=config_data,
+            confirm_override=confirm_override,
+        )
+        return result["message"]
+
     else:
         return f"Error: Invalid action '{action}'"
 
@@ -660,104 +693,31 @@ async def manage_executors(
         connector_name: str | None = None,
         trading_pair: str | None = None,
 ) -> str:
-    """Manage trading executors with progressive disclosure for lifecycle management.
+    """Manage trading executors: create, search, stop, and configure preferences.
 
-    ⭐ PRIORITY: This is the DEFAULT tool for ALL trading operations:
-    - **Buying/Selling**: Use `order_executor` — supports MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER strategies,
-      USD amounts ('$100'), leverage, position_action OPEN/CLOSE. To cancel: use action="stop" on the executor.
-    - **LP Positions**: Use `lp_executor` — opens/manages CLMM positions on Meteora, Raydium with full lifecycle tracking.
-      Use `explore_dex_pools` to discover pools first (list_pools, get_pool_info).
-    - **Grid/DCA/Position strategies**: Use grid_executor, dca_executor, position_executor.
+    This is the DEFAULT tool for ALL trading operations. Use progressive disclosure to get
+    the full guide and config schema for any executor type before creating.
 
-    Available Executor Types:
+    Executor Types (pass executor_type with no action to see full guide + schema):
+    - order_executor: Buy/sell orders (MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER)
+    - position_executor: Directional positions with SL/TP management
+    - grid_executor: Grid trading for range-bound markets
+    - dca_executor: Dollar-cost averaging with scheduled levels
+    - lp_executor: CLMM LP positions on Meteora/Raydium (use explore_dex_pools first)
 
-    ## order_executor
-    **THE standard way to buy/sell assets.** Simple order execution with retry logic and multiple execution strategies.
-    Closest executor to a plain BUY/SELL order but with strategy options.
-    Use when: Want to place a single buy or sell order with a specific execution strategy
-    (LIMIT, MARKET, LIMIT_MAKER, or LIMIT_CHASER). To cancel an order, use action="stop" on the executor.
-    Avoid when: Need complex multi-level strategies (use grid/dca instead),
-    want automated SL/TP management (use position_executor instead).
-    Execution strategies: MARKET, LIMIT, LIMIT_MAKER, LIMIT_CHASER.
-
-    ## lp_executor
-    **THE standard way to manage LP positions.** Manages liquidity provider positions on CLMM DEXs (Meteora, Raydium).
-    Use when: Providing liquidity on Solana DEXs, want automated position monitoring and fee tracking.
-    Use `explore_dex_pools` to discover pools before opening positions.
-    Avoid when: Trading on CEX, want directional exposure only, not familiar with impermanent loss risks.
-    Connector must use `/clmm` suffix (e.g., `meteora/clmm`, `raydium/clmm`).
-    Supports single-sided (base or quote only) and double-sided positions.
-    Auto-close feature enables limit-order-style LP positions.
-
-    ## position_executor
-    Takes directional positions with defined entry, stop-loss, and take-profit levels.
-    Use when: Clear directional view, want automated SL/TP, defined risk/reward.
-    Avoid when: Want to provide liquidity, need multi-leg strategies.
-
-    ## dca_executor
-    Dollar-cost averages into positions over time with scheduled purchases.
-    Use when: Accumulating gradually, reducing timing risk, building long-term position.
-    Avoid when: Need immediate full entry, want quick exits.
-
-    ## grid_executor
-    Trades in ranging markets with multiple buy/sell levels in a grid pattern.
-    Use when: Range-bound market, profit from volatility, want auto-rebalancing.
-    Avoid when: Strongly trending market, limited capital for spread across levels.
-    Direction rules:
-    - LONG grid:  limit_price < start_price < end_price (limit below grid, buys low)
-    - SHORT grid: start_price < end_price < limit_price (limit above grid, sells high)
-    - side must be explicitly set: 1=BUY (LONG), 2=SELL (SHORT)
-    Risk management (NO stop_loss):
-    - limit_price is the safety boundary — when price crosses it, the grid stops.
-    - keep_position=false: closes position on stop (stop-loss-like exit).
-    - keep_position=true: holds position on stop (wait for recovery).
-
-    Executors are automated trading components that execute specific strategies.
-    This tool guides you through understanding, creating, monitoring, and stopping executors.
-
-    IMPORTANT: When creating any executor, you MUST ask the user how much capital to allocate before creating.
-    Each executor type uses a DIFFERENT amount field:
-    - grid_executor: `total_amount_quote` (quote currency, e.g., 100 USDT)
-    - position_executor: `amount` (BASE currency, e.g., 0.01 BTC). Convert from USD: amount = usd / price
-    - dca_executor: `amounts_quote` (list of quote amounts per level, e.g., [100, 100, 150])
-    - order_executor: `amount` (base currency, or '$100' for USD value)
-    - lp_executor: `base_amount` and/or `quote_amount` (token amounts to provide as liquidity)
-    Never assume or default these values. Always check the guide first via progressive disclosure.
-
-    IMPORTANT - Grid Executor Side:
-    When creating a grid_executor, you MUST explicitly set the `side` parameter using numeric enum values:
-    - side: 1 = BUY (LONG grid)
-    - side: 2 = SELL (SHORT grid)
-    The limit_price alone does NOT determine the direction. If side is omitted, it defaults to BUY.
-    For SHORT grids (limit_price above the range), always pass side: 2.
-
-    IMPORTANT - Grid Executor Risk Management:
-    The grid executor does NOT use stop_loss. Never suggest or expose stop_loss to the user.
-    Risk management is handled entirely via `limit_price` + `keep_position`:
-    - `limit_price` acts as the safety boundary — when price crosses it, the grid stops.
-    - `keep_position=false`: closes the accumulated position on stop (acts like a stop-loss exit).
-    - `keep_position=true`: holds the accumulated position on stop (wait for recovery).
-    Always guide users to set `limit_price` as their risk boundary and choose `keep_position` accordingly.
-
-    Progressive Flow:
-    1. executor_type only → Show config schema with your saved defaults applied
-    2. action="create" + executor_config → Create executor (merged with your defaults)
-    3. action="search" → Search/list executors with filters (add executor_id to get detail for one)
-    4. action="stop" + executor_id → Stop executor (with keep_position option)
-    5. action="get_logs" + executor_id → Get executor logs (only for active executors, logs cleared on completion)
-
-    Preference Management (stored in ~/.hummingbot_mcp/executor_preferences.md):
-    6. action="get_preferences" → View raw markdown preferences file (read before saving)
-    7. action="save_preferences" + preferences_content → Save complete preferences file content
-    8. action="reset_preferences" → Reset all preferences to defaults
-
-    Position Management:
-    9. action="positions_summary" → Get all positions (add connector_name + trading_pair for specific one)
-    10. action="clear_position" + connector_name + trading_pair → Clear position closed manually
+    Actions:
+    - (none) + executor_type → Show full guide, config schema, and saved defaults
+    - create + executor_config → Create executor (merged with saved defaults)
+    - search → List/filter executors (add executor_id for detail)
+    - stop + executor_id → Stop executor (with keep_position option)
+    - get_logs + executor_id → Get logs (active executors only)
+    - get_preferences / save_preferences / reset_preferences → Manage saved defaults
+    - positions_summary → View all positions (add connector_name + trading_pair to filter)
+    - clear_position + connector_name + trading_pair → Clear externally-closed position
 
     Args:
         action: Action to perform. Leave empty to see executor types or config schema.
-        executor_type: Type of executor (e.g., 'position_executor', 'dca_executor'). Provide to see config schema.
+        executor_type: Type of executor. Provide alone to see its full guide and config schema.
         executor_config: Configuration for creating an executor. Required for 'create' action.
         executor_id: Executor ID for 'search' (detail), 'stop', or 'get_logs' actions.
         log_level: Filter logs by level - 'ERROR', 'WARNING', 'INFO', 'DEBUG' (for get_logs).
@@ -770,7 +730,7 @@ async def manage_executors(
         limit: Maximum results to return (default: 50, max: 1000).
         keep_position: When stopping, keep the position open instead of closing it (default: False).
         save_as_default: Save executor_config as default for this executor_type (default: False).
-        preferences_content: Complete markdown content for the preferences file. Required for 'save_preferences' action. Read current content with 'get_preferences' first, make edits, then save back.
+        preferences_content: Complete markdown content for the preferences file. Required for 'save_preferences'.
         account_name: Account name for creating executors (default: 'master_account').
         connector_name: Connector name for position filtering or clearing.
         trading_pair: Trading pair for position filtering or clearing.
@@ -801,207 +761,6 @@ async def manage_executors(
     result = await manage_executors_impl(client, request)
 
     return result.get("formatted_output", str(result))
-
-
-# Gateway Tools
-
-
-@mcp.tool()
-@handle_errors("manage gateway container", GATEWAY_LOG_HINT)
-async def manage_gateway_container(
-        action: Literal["get_status", "start", "stop", "restart", "get_logs"],
-        config: dict[str, Any] | None = None,
-        tail: int | None = 100,
-) -> str:
-    """Manage Gateway container lifecycle operations.
-
-    Supports:
-    - get_status: Check Gateway container status
-    - start: Start Gateway with configuration
-    - stop: Stop Gateway container
-    - restart: Restart Gateway (optionally with new config)
-    - get_logs: Get container logs
-
-    Args:
-        action: Action to perform on Gateway container
-        config: Gateway configuration (required for 'start', optional for 'restart').
-               Required fields: passphrase (Gateway passphrase), image (Docker image).
-               Optional fields: port (exposed port, default: 15888), environment (env vars)
-        tail: Number of log lines to retrieve (only for 'get_logs' action, default: 100, max: 200)
-    """
-    # Create and validate request using Pydantic model
-    request = GatewayContainerRequest(action=action, config=config, tail=tail)
-
-    client = await hummingbot_client.get_client()
-    result = await manage_gateway_container_impl(client, request)
-    return format_gateway_container_result(result)
-
-
-@mcp.tool()
-@handle_errors("manage gateway configuration", GATEWAY_LOG_HINT)
-async def manage_gateway_config(
-        resource_type: Literal["chains", "networks", "tokens", "connectors", "pools", "wallets"],
-        action: Literal["list", "get", "update", "add", "delete"],
-        network_id: str | None = None,
-        connector_name: str | None = None,
-        config_updates: dict[str, Any] | None = None,
-        token_address: str | None = None,
-        token_symbol: str | None = None,
-        token_decimals: int | None = None,
-        token_name: str | None = None,
-        pool_type: str | None = None,
-        pool_base: str | None = None,
-        pool_quote: str | None = None,
-        pool_address: str | None = None,
-        search: str | None = None,
-        network: str | None = None,
-        chain: str | None = None,
-        private_key: str | None = None,
-        wallet_address: str | None = None,
-) -> str:
-    """Manage Gateway configuration for chains, networks, tokens, connectors, pools, and wallets.
-
-    Resource Types:
-    - chains: Get all blockchain chains
-    - networks: List/get/update network configurations (format: 'chain-network')
-      - GET returns merged chain + network config including: defaultWallet, defaultNetwork, rpcProvider, nodeURL, chainID, etc.
-      - UPDATE can modify both network-level fields (nodeURL, chainID) and chain-level fields (defaultWallet, defaultNetwork)
-    - tokens: List/add/delete tokens per network
-    - connectors: List/get/update DEX connector configurations
-    - pools: List/add liquidity pools per connector/network
-    - wallets: Add/delete wallets for blockchain chains
-
-    Examples:
-    - Get network config with defaultWallet: resource_type="networks", action="get", network_id="solana-mainnet-beta"
-    - Set default wallet: resource_type="networks", action="update", network_id="solana-mainnet-beta", config_updates={"defaultWallet": "wallet_address"}
-
-    Args:
-        resource_type: Type of resource to manage
-        action: Action to perform on the resource
-        network_id: Network ID in format 'chain-network' (e.g., 'solana-mainnet-beta')
-        connector_name: DEX connector name (e.g., 'meteora', 'raydium')
-        config_updates: Configuration updates as key-value pairs
-        token_address: Token contract address
-        token_symbol: Token symbol (e.g., 'USDC')
-        token_decimals: Token decimals (e.g., 6 for USDC)
-        token_name: Token name (optional)
-        pool_type: Pool type (e.g., 'CLMM', 'AMM')
-        pool_base: Base token symbol for pool
-        pool_quote: Quote token symbol for pool
-        pool_address: Pool contract address
-        search: Search term to filter tokens
-        network: Network name (e.g., 'mainnet-beta') for pool operations
-        chain: Blockchain chain for wallet (e.g., 'solana', 'ethereum')
-        private_key: Private key for wallet (required for 'add' wallet action)
-        wallet_address: Wallet address (required for 'delete' wallet action)
-    """
-    # Create and validate request using Pydantic model
-    request = GatewayConfigRequest(
-        resource_type=resource_type,
-        action=action,
-        network_id=network_id,
-        connector_name=connector_name,
-        config_updates=config_updates,
-        token_address=token_address,
-        token_symbol=token_symbol,
-        token_decimals=token_decimals,
-        token_name=token_name,
-        pool_type=pool_type,
-        pool_base=pool_base,
-        pool_quote=pool_quote,
-        pool_address=pool_address,
-        search=search,
-        network=network,
-        chain=chain,
-        private_key=private_key,
-        wallet_address=wallet_address,
-    )
-
-    client = await hummingbot_client.get_client()
-    result = await manage_gateway_config_impl(client, request)
-    return format_gateway_config_result(result)
-
-
-@mcp.tool()
-@handle_errors("manage gateway swaps", GATEWAY_LOG_HINT)
-async def manage_gateway_swaps(
-        action: Literal["quote", "execute", "search", "get_status"],
-        connector: str | None = None,
-        network: str | None = None,
-        trading_pair: str | None = None,
-        side: Literal["BUY", "SELL"] | None = None,
-        amount: str | None = None,
-        slippage_pct: str | None = "1.0",
-        wallet_address: str | None = None,
-        transaction_hash: str | None = None,
-        search_connector: str | None = None,
-        search_network: str | None = None,
-        search_wallet_address: str | None = None,
-        search_trading_pair: str | None = None,
-        status: Literal["SUBMITTED", "CONFIRMED", "FAILED"] | None = None,
-        start_time: int | None = None,
-        end_time: int | None = None,
-        limit: int | None = 50,
-        offset: int | None = 0,
-) -> str:
-    """Manage Gateway swap operations: quote, execute, search swaps.
-
-    Supports DEX router swaps via Jupiter (Solana) and 0x (Ethereum).
-
-    Actions:
-    - quote: Get price quote for a swap before executing
-    - execute: Execute a swap transaction on DEX
-    - search: Search swap history with filters
-    - get_status: Get status of a specific swap by transaction hash
-
-    Quote/Execute Parameters (required for quote/execute):
-        connector: DEX router connector (e.g., 'jupiter', '0x')
-        network: Network ID in 'chain-network' format (e.g., 'solana-mainnet-beta', 'ethereum-mainnet')
-        trading_pair: Trading pair in BASE-QUOTE format (e.g., 'SOL-USDC', 'ETH-USDT')
-        side: Trade side - 'BUY' (buy base with quote) or 'SELL' (sell base for quote)
-        amount: Amount to swap (for BUY: base to receive, for SELL: base to sell)
-        slippage_pct: Maximum slippage percentage (default: 1.0)
-        wallet_address: Wallet address for execute (optional, uses default if not provided)
-
-    Get Status Parameters:
-        transaction_hash: Transaction hash to check status
-
-    Search Parameters (all optional):
-        search_connector: Filter by connector
-        search_network: Filter by network
-        search_wallet_address: Filter by wallet address
-        search_trading_pair: Filter by trading pair
-        status: Filter by status (SUBMITTED, CONFIRMED, FAILED)
-        start_time: Start timestamp (unix seconds)
-        end_time: End timestamp (unix seconds)
-        limit: Max results (default: 50, max: 1000)
-        offset: Pagination offset (default: 0)
-    """
-    # Create and validate request using Pydantic model
-    request = GatewaySwapRequest(
-        action=action,
-        connector=connector,
-        network=network,
-        trading_pair=trading_pair,
-        side=side,
-        amount=amount,
-        slippage_pct=slippage_pct,
-        wallet_address=wallet_address,
-        transaction_hash=transaction_hash,
-        search_connector=search_connector,
-        search_network=search_network,
-        search_wallet_address=search_wallet_address,
-        search_trading_pair=search_trading_pair,
-        status=status,
-        start_time=start_time,
-        end_time=end_time,
-        limit=limit,
-        offset=offset,
-    )
-
-    client = await hummingbot_client.get_client()
-    result = await manage_gateway_swaps_impl(client, request)
-    return format_gateway_swap_result(action, result)
 
 
 @mcp.tool()
@@ -1059,6 +818,74 @@ async def explore_dex_pools(
     client = await hummingbot_client.get_client()
     result = await explore_gateway_clmm_pools_impl(client, request)
     return format_gateway_clmm_pool_result(action, result)
+
+
+# GeckoTerminal Tools
+
+
+@mcp.tool()
+@handle_errors("explore GeckoTerminal")
+async def explore_geckoterminal(
+        action: Literal[
+            "networks", "dexes", "trending_pools", "top_pools", "new_pools",
+            "pool_detail", "multi_pools", "token_pools", "token_info", "ohlcv", "trades",
+        ],
+        network: str | None = None,
+        dex_id: str | None = None,
+        pool_address: str | None = None,
+        pool_addresses: list[str] | None = None,
+        token_address: str | None = None,
+        timeframe: str = "1h",
+        before_timestamp: int | None = None,
+        currency: str = "usd",
+        token: str = "base",
+        limit: int = 1000,
+        trade_volume_filter: float | None = None,
+) -> str:
+    """Explore DEX market data from GeckoTerminal (free, no API key needed).
+
+    Progressive discovery flow:
+    1. action="networks" → List all supported networks (solana, eth, bsc, ...)
+    2. action="dexes" + network → List DEXes on a network
+    3. action="trending_pools" (+ network) → Trending pools globally or per network
+    4. action="top_pools" + network (+ dex_id) → Top pools by volume on a network/dex
+    5. action="new_pools" (+ network) → Recently created pools
+    6. action="pool_detail" + network + pool_address → Detailed info for one pool
+    7. action="multi_pools" + network + pool_addresses → Compare multiple pools
+    8. action="token_pools" + network + token_address → Top pools for a token
+    9. action="token_info" + network + token_address → Token details (price, mcap, fdv)
+    10. action="ohlcv" + network + pool_address → OHLCV candle data
+    11. action="trades" + network + pool_address → Recent trades
+
+    Args:
+        action: The data to retrieve.
+        network: Network ID (e.g., 'solana', 'eth', 'bsc'). Required for most actions.
+        dex_id: DEX ID filter for top_pools (e.g., 'raydium', 'uniswap_v3').
+        pool_address: Pool contract address (for pool_detail, ohlcv, trades).
+        pool_addresses: List of pool addresses (for multi_pools).
+        token_address: Token contract address (for token_pools, token_info).
+        timeframe: OHLCV interval (default: '1h'). Options: 1m, 5m, 15m, 1h, 4h, 12h, 1d.
+        before_timestamp: Fetch OHLCV candles before this unix timestamp (pagination).
+        currency: OHLCV price currency, 'usd' or 'token' (default: 'usd').
+        token: Which token's price for OHLCV, 'base' or 'quote' (default: 'base').
+        limit: Max OHLCV candles to return (default: 1000).
+        trade_volume_filter: Min trade volume in USD to filter trades (optional).
+    """
+    result = await explore_geckoterminal_impl(
+        action=action,
+        network=network,
+        dex_id=dex_id,
+        pool_address=pool_address,
+        pool_addresses=pool_addresses,
+        token_address=token_address,
+        timeframe=timeframe,
+        before_timestamp=before_timestamp,
+        currency=currency,
+        token=token,
+        limit=limit,
+        trade_volume_filter=trade_volume_filter,
+    )
+    return result.get("formatted_output", str(result))
 
 
 async def _run():

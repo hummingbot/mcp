@@ -16,11 +16,14 @@ async def manage_controllers(
     controller_code: str | None = None,
     config_name: str | None = None,
     config_data: dict[str, Any] | None = None,
-    bot_name: str | None = None,
     confirm_override: bool = False,
+    include_code: bool = False,
 ) -> dict[str, Any]:
     """
     Unified controller management: list, describe, upsert, delete.
+
+    Design-time only — works with saved templates and configs for future deployments.
+    Does NOT affect running bots. To modify a live bot's config, use manage_bots with action='update_config'.
 
     Routes to explore_controllers for list/describe and modify_controllers for upsert/delete.
     """
@@ -31,6 +34,7 @@ async def manage_controllers(
             controller_type=controller_type,
             controller_name=controller_name,
             config_name=config_name,
+            include_code=include_code,
         )
     elif action in ("upsert", "delete"):
         if not target:
@@ -44,7 +48,6 @@ async def manage_controllers(
             controller_code=controller_code,
             config_name=config_name,
             config_data=config_data,
-            bot_name=bot_name,
             confirm_override=confirm_override,
         )
     else:
@@ -57,6 +60,7 @@ async def explore_controllers(
     controller_type: Literal["directional_trading", "market_making", "generic"] | None = None,
     controller_name: str | None = None,
     config_name: str | None = None,
+    include_code: bool = False,
 ) -> dict[str, Any]:
     """
     Explore controllers and their configurations.
@@ -67,6 +71,7 @@ async def explore_controllers(
         controller_type: Type of controller to filter by
         controller_name: Name of controller to describe
         config_name: Name of config to describe
+        include_code: If True, include full controller source code in describe output
 
     Returns:
         Dictionary containing exploration results and formatted output
@@ -99,7 +104,7 @@ async def explore_controllers(
         result = ""
         config = None
 
-        # Get config if specified
+        # Get config if specified — show config details directly
         if config_name:
             config = await client.controllers.get_controller_config(config_name)
             if config:
@@ -108,13 +113,16 @@ async def explore_controllers(
                     result += f"Controller name not matching, using config's controller name: {controller_name}\n"
                 elif not controller_name:
                     controller_name = config.get("controller_name")
-                result += f"Config Details for {config_name}:\n{config}\n\n"
+                result += f"Config '{config_name}' Details:\n"
+                for key, value in config.items():
+                    result += f"  {key}: {value}\n"
+                result += "\n"
 
         if not controller_name:
             return {
                 "action": "describe",
-                "error": "Please provide a controller name to describe.",
-                "formatted_output": "Please provide a controller name to describe.",
+                "error": "Please provide a controller_name or config_name to describe.",
+                "formatted_output": "Please provide a controller_name or config_name to describe.",
             }
 
         # Determine the controller type
@@ -131,22 +139,17 @@ async def explore_controllers(
                 "formatted_output": f"Controller '{controller_name}' not found.",
             }
 
-        # Get controller code and configs
-        controller_code = await client.controllers.get_controller(found_controller_type, controller_name)
+        # Get config template (lightweight — just parameter schema)
         controller_configs = [c.get("id") for c in configs if c.get('controller_name') == controller_name]
         template = await client.controllers.get_controller_config_template(found_controller_type, controller_name)
 
         result += f"Controller: {controller_name} ({found_controller_type})\n\n"
-        result += f"Controller Code:\n{controller_code}\n\n"
 
-        # Format configs list
-        result += f"Total Configs Available: {len(controller_configs)}\n"
-        if len(controller_configs) <= 10:
-            result += f"Configs:\n" + "\n".join(f"  - {c}" for c in controller_configs if c) + "\n\n"
-        else:
-            result += f"Configs (showing first 10 of {len(controller_configs)}):\n"
-            result += "\n".join(f"  - {c}" for c in controller_configs[:10] if c) + "\n"
-            result += f"  ... and {len(controller_configs) - 10} more\n\n"
+        # Only fetch and include full source code when explicitly requested
+        controller_code_content = None
+        if include_code:
+            controller_code_content = await client.controllers.get_controller(found_controller_type, controller_name)
+            result += f"Controller Code:\n{controller_code_content}\n\n"
 
         # Format config template parameters as table
         result += "Configuration Parameters:\n"
@@ -168,16 +171,32 @@ async def explore_controllers(
 
             result += f"{param_name:28} | {param_type:17} | {default}\n"
 
-        return {
+        result += "\n"
+
+        # Format configs list
+        result += f"Total Configs: {len(controller_configs)}\n"
+        if len(controller_configs) <= 10:
+            result += "Configs:\n" + "\n".join(f"  - {c}" for c in controller_configs if c) + "\n"
+        else:
+            result += f"Configs (showing first 10 of {len(controller_configs)}):\n"
+            result += "\n".join(f"  - {c}" for c in controller_configs[:10] if c) + "\n"
+            result += f"  ... and {len(controller_configs) - 10} more\n"
+
+        if not include_code:
+            result += "\nTip: Set include_code=True to see the full controller source code.\n"
+
+        return_data = {
             "action": "describe",
             "controller_name": controller_name,
             "controller_type": found_controller_type,
-            "controller_code": controller_code,
             "template": template,
             "configs": controller_configs,
             "config_details": config,
             "formatted_output": result,
         }
+        if controller_code_content is not None:
+            return_data["controller_code"] = controller_code_content
+        return return_data
 
     else:
         return {
@@ -196,11 +215,12 @@ async def modify_controllers(
     controller_code: str | None = None,
     config_name: str | None = None,
     config_data: dict[str, Any] | None = None,
-    bot_name: str | None = None,
     confirm_override: bool = False,
 ) -> dict[str, Any]:
     """
-    Create, update, or delete controllers and configurations.
+    Create, update, or delete controllers and saved configurations (design-time only).
+
+    Does NOT affect running bots. To modify a live bot's config, use manage_bots with action='update_config'.
 
     Args:
         client: Hummingbot API client
@@ -211,7 +231,6 @@ async def modify_controllers(
         controller_code: Code for controller (required for controller upsert)
         config_name: Name of config
         config_data: Configuration data (required for config upsert)
-        bot_name: Bot name (for config modification in specific bot)
         confirm_override: Confirm overwriting existing items
 
     Returns:
@@ -286,76 +305,34 @@ async def modify_controllers(
             # Validate config first
             await client.controllers.validate_controller_config(config_controller_type, config_controller_name, config_data)
 
-            if bot_name:
-                # Modifying config in a specific bot
-                if not confirm_override:
-                    current_configs = await client.controllers.get_bot_controller_configs(bot_name)
-                    config = next((c for c in current_configs if c.get("id") == config_name), None)
-                    if config:
-                        return {
-                            "action": "upsert",
-                            "target": "config",
-                            "exists": True,
-                            "config_name": config_name,
-                            "bot_name": bot_name,
-                            "current_config": config,
-                            "message": (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
-                                       "Set confirm_override=True to update it."),
-                        }
-                    else:
-                        update_op = await client.controllers.update_bot_controller_config(bot_name, config_name, config_data)
-                        return {
-                            "action": "upsert",
-                            "target": "config",
-                            "exists": False,
-                            "config_name": config_name,
-                            "bot_name": bot_name,
-                            "result": update_op,
-                            "message": f"Config created in bot '{bot_name}': {update_op}",
-                        }
-                else:
-                    # Ensure config_data has the correct id
-                    if "id" not in config_data or config_data["id"] != config_name:
-                        config_data["id"] = config_name
-                    update_op = await client.controllers.update_bot_controller_config(bot_name, config_name, config_data)
-                    return {
-                        "action": "upsert",
-                        "target": "config",
-                        "exists": True,
-                        "config_name": config_name,
-                        "bot_name": bot_name,
-                        "result": update_op,
-                        "message": f"Config updated in bot '{bot_name}': {update_op}",
-                    }
-            else:
-                # Modifying global config
-                if "id" not in config_data or config_data["id"] != config_name:
-                    config_data["id"] = config_name
+            # Modifying saved/global config (design-time only)
+            if "id" not in config_data or config_data["id"] != config_name:
+                config_data["id"] = config_name
 
-                controller_configs = await client.controllers.list_controller_configs()
-                exists = config_name in [c.get("id") for c in controller_configs]
+            controller_configs = await client.controllers.list_controller_configs()
+            exists = config_name in [c.get("id") for c in controller_configs]
 
-                if exists and not confirm_override:
-                    existing_config = await client.controllers.get_controller_config(config_name)
-                    return {
-                        "action": "upsert",
-                        "target": "config",
-                        "exists": True,
-                        "config_name": config_name,
-                        "current_config": existing_config,
-                        "message": (f"Config '{config_name}' already exists with data: {existing_config}. "
-                                   "Set confirm_override=True to update it."),
-                    }
-
-                result = await client.controllers.create_or_update_controller_config(config_name, config_data)
+            if exists and not confirm_override:
+                existing_config = await client.controllers.get_controller_config(config_name)
                 return {
                     "action": "upsert",
                     "target": "config",
-                    "exists": exists,
+                    "exists": True,
                     "config_name": config_name,
-                    "result": result,
-                    "message": f"Config {'updated' if exists else 'created'}: {result}",
+                    "current_config": existing_config,
+                    "message": (f"Config '{config_name}' already exists with data: {existing_config}. "
+                               "Set confirm_override=True to update it."),
                 }
+
+            result = await client.controllers.create_or_update_controller_config(config_name, config_data)
+            return {
+                "action": "upsert",
+                "target": "config",
+                "exists": exists,
+                "config_name": config_name,
+                "result": result,
+                "message": f"Config {'updated' if exists else 'created'}: {result}",
+            }
 
         elif action == "delete":
             if not config_name:

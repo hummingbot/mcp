@@ -193,3 +193,102 @@ async def manage_bot_execution(
 
     else:
         raise ValueError(f"Invalid action: {action}")
+
+
+async def get_bot_controller_configs(client: Any, bot_name: str) -> dict[str, Any]:
+    """
+    Get the current controller configs of a running bot.
+
+    Args:
+        client: Hummingbot API client
+        bot_name: Name of the running bot
+
+    Returns:
+        Dictionary containing the bot's controller configs and formatted output
+    """
+    current_configs = await client.controllers.get_bot_controller_configs(bot_name)
+
+    result = f"Controller configs for bot '{bot_name}':\n\n"
+    if not current_configs:
+        result += "No controller configs found.\n"
+    else:
+        for config in current_configs:
+            config_id = config.get("id", "unknown")
+            result += f"Config: {config_id}\n"
+            for key, value in config.items():
+                result += f"  {key}: {value}\n"
+            result += "\n"
+
+    return {
+        "bot_name": bot_name,
+        "configs": current_configs,
+        "formatted_output": result,
+    }
+
+
+async def update_bot_controller_config(
+    client: Any,
+    bot_name: str,
+    config_name: str,
+    config_data: dict[str, Any],
+    confirm_override: bool = False,
+) -> dict[str, Any]:
+    """
+    Update a controller config inside a running bot in real-time.
+
+    Args:
+        client: Hummingbot API client
+        bot_name: Name of the running bot
+        config_name: Name of the config to update
+        config_data: New configuration data (must include 'controller_type' and 'controller_name')
+        confirm_override: Required True if overwriting an existing config
+
+    Returns:
+        Dictionary containing update results and message
+    """
+    # Extract and validate controller info from config_data
+    config_controller_type = config_data.get("controller_type")
+    config_controller_name = config_data.get("controller_name")
+
+    if not config_controller_type or not config_controller_name:
+        raise ValueError("config_data must include 'controller_type' and 'controller_name'")
+
+    # Validate config first
+    await client.controllers.validate_controller_config(config_controller_type, config_controller_name, config_data)
+
+    if not confirm_override:
+        current_configs = await client.controllers.get_bot_controller_configs(bot_name)
+        config = next((c for c in current_configs if c.get("id") == config_name), None)
+        if config:
+            return {
+                "action": "update_config",
+                "exists": True,
+                "config_name": config_name,
+                "bot_name": bot_name,
+                "current_config": config,
+                "message": (f"Config '{config_name}' already exists in bot '{bot_name}' with data: {config}. "
+                           "Set confirm_override=True to update it."),
+            }
+        else:
+            update_op = await client.controllers.update_bot_controller_config(bot_name, config_name, config_data)
+            return {
+                "action": "update_config",
+                "exists": False,
+                "config_name": config_name,
+                "bot_name": bot_name,
+                "result": update_op,
+                "message": f"Config created in bot '{bot_name}': {update_op}",
+            }
+    else:
+        # Ensure config_data has the correct id
+        if "id" not in config_data or config_data["id"] != config_name:
+            config_data["id"] = config_name
+        update_op = await client.controllers.update_bot_controller_config(bot_name, config_name, config_data)
+        return {
+            "action": "update_config",
+            "exists": True,
+            "config_name": config_name,
+            "bot_name": bot_name,
+            "result": update_op,
+            "message": f"Config updated in bot '{bot_name}': {update_op}",
+        }
