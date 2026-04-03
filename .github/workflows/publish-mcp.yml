@@ -1,103 +1,57 @@
-name: Publish MCP server
+name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
   push:
-    tags:
-      - "v*.*.*"
-
-permissions:
-  contents: read
-  id-token: write  # required for GitHub OIDC to the MCP Registry
-
-env:
-  IMAGE_NAME: hummingbot/hummingbot-mcp
-  SERVER_NAME: io.github.hummingbot/mcp
-  SERVER_JSON: server.json
+    branches:
+      - main
 
 jobs:
-  build-and-push-image:
+  publish:
+    name: Build and Publish
     runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Derive version/tag
-        id: vars
-        run: |
-          TAG="${GITHUB_REF_NAME#refs/tags/}"
-          # Sanitize: strip leading "v" for server.json version fields
-          SANITIZED="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "sanitized=${SANITIZED}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU (cross-arch emulation)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          version: "latest"
 
-      - name: Build & push multi-arch image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            docker.io/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
-            docker.io/${{ env.IMAGE_NAME }}:latest
-          labels: |
-            io.modelcontextprotocol.server.name=${{ env.SERVER_NAME }}
+      - name: Set up Python
+        run: uv python install
 
-  publish-to-mcp-registry:
-    needs: build-and-push-image
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install deps (jq + Homebrew)
+      - name: Check if version is already on PyPI
+        id: check_version
+        shell: bash
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq build-essential curl git
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> "$HOME/.bashrc"
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          brew install mcp-publisher
+          # 1. Get the current version from pyproject.toml
+          CURRENT_VERSION=$(grep -m 1 '^version = ' pyproject.toml | tr -d '"' | tr -d "'" | awk '{print $3}')
+          PACKAGE_NAME=$(grep -m 1 '^name = ' pyproject.toml | tr -d '"' | tr -d "'" | awk '{print $3}')
+          
+          echo "Current local version: $CURRENT_VERSION"
+          
+          # 2. Query PyPI for the version (returns 404 if version doesn't exist)
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/$PACKAGE_NAME/$CURRENT_VERSION/json || echo "404")
+          
+          if [ "$STATUS_CODE" -eq "200" ]; then
+            echo "Version $CURRENT_VERSION already exists on PyPI. Skipping publish."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $CURRENT_VERSION is new. Proceeding..."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Derive version/tag (again in this job)
-        id: vars
-        run: |
-          TAG="${GITHUB_REF_NAME#refs/tags/}"
-          SANITIZED="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "sanitized=${SANITIZED}" >> "$GITHUB_OUTPUT"
+      - name: Build package
+        if: steps.check_version.outputs.skip != 'true'
+        run: uv build
 
-      - name: Sync server.json version to tag
-        run: |
-          jq --arg v "${{ steps.vars.outputs.sanitized }}" \
-             '.version=$v | .packages[0].version=$v' \
-             "${{ env.SERVER_JSON }}" > server.json.tmp
-          mv server.json.tmp "${{ env.SERVER_JSON }}"
-          echo "Updated server.json:"
-          cat "${{ env.SERVER_JSON }}"
-
-      - name: Login to MCP Registry (GitHub OIDC)
-        run: |
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          mcp-publisher login github-oidc
-
-      - name: Publish server to MCP Registry
+      - name: Publish to PyPI
+        if: steps.check_version.outputs.skip != 'true'
+        run: uv publish
         env:
-          MCP_REGISTRY: https://registry.modelcontextprotocol.io
-        run: |
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          mcp-publisher publish --registry "$MCP_REGISTRY" --file "${{ env.SERVER_JSON }}"
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
