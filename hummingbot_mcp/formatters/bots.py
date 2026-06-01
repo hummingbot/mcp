@@ -7,7 +7,6 @@ from typing import Any
 
 from .base import (
     format_number,
-    format_percentage,
     format_table_separator,
     format_time_only,
     get_field,
@@ -46,6 +45,16 @@ def format_bot_logs_as_table(logs: list[dict[str, Any]]) -> str:
         rows.append(row)
 
     return f"{header}\n{separator}\n" + "\n".join(rows)
+
+
+def _format_percent_value(pct: Any) -> str:
+    if pct is None or pct == "N/A":
+        return "N/A"
+
+    try:
+        return f"{float(pct):.2f}%"
+    except (TypeError, ValueError):
+        return str(pct)
 
 
 def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
@@ -100,7 +109,7 @@ def format_active_bots_as_table(bots_data: dict[str, Any]) -> str:
                 realized_pnl = format_number(get_field(ctrl_perf, "realized_pnl_quote", default=None), compact=False)
                 unrealized_pnl = format_number(get_field(ctrl_perf, "unrealized_pnl_quote", default=None), compact=False)
                 global_pnl = format_number(get_field(ctrl_perf, "global_pnl_quote", default=None), compact=False)
-                global_pnl_pct = format_percentage(get_field(ctrl_perf, "global_pnl_pct", default=None))
+                global_pnl_pct = _format_percent_value(get_field(ctrl_perf, "global_pnl_pct", default=None))
                 volume = format_number(get_field(ctrl_perf, "volume_traded", default=None), compact=False)
 
                 row = (
