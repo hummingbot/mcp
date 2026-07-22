@@ -141,6 +141,7 @@ async def configure_server(
 
     from urllib.parse import urlparse
     parsed = urlparse(current.url)
+    current_scheme = parsed.scheme or "http"
     current_host = parsed.hostname or "localhost"
     current_port = parsed.port or 8000
 
@@ -152,7 +153,7 @@ async def configure_server(
 
     new_config = ServerConfig(
         name=final_name,
-        url=f"http://{final_host}:{final_port}",
+        url=f"{current_scheme}://{final_host}:{final_port}",
         username=final_username,
         password=final_password,
     )
